@@ -10,8 +10,9 @@ DESCRIPTION
     processes over sockets. It wrappes your favorite IO::Socket module and
     controls the amount of data over the socket. The default serializer is
     Storable and the functions nfreeze() and thaw() but you can choose each
-    serialize you want. You need only some lines of code to adjust it for
-    yourself. Take a look to the method documentation and it's options.
+    other serializer you wish to use. You need only some lines of code to
+    adjust it for yourself. Take a look to the method documentation and it's
+    options.
 
 METHODS
   new()
@@ -19,7 +20,7 @@ METHODS
 
         read_max_bytes  Set the maximum allowed bytes to read from the socket.
         send_max_bytes  Set the maximum allowed bytes to send over the socket.
-        favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL.
+        favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL or something else.
         deflate         Pass your own sub reference for serializion.
         inflate         Pass your own sub reference for deserializion.
 
@@ -109,6 +110,11 @@ METHODS
 
     If a connection is accepted a new object is created related to the peer.
     The new object will be returned.
+
+    In addition you can set a timeout if your favorite module provides a
+    "timeout()" method.
+
+        $sipc->accept(10)
 
   disconnect()
     Call "disconnect()" to disconnect the current connection. "disconnect()"

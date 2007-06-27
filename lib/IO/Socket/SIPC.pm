@@ -11,8 +11,8 @@ IO::Socket::SIPC - Serialized perl structures for inter process communication.
 This module makes it possible to transport perl structures between processes over sockets.
 It wrappes your favorite IO::Socket module and controls the amount of data over the socket.
 The default serializer is Storable and the functions nfreeze() and thaw() but you can
-choose each serialize you want. You need only some lines of code to adjust it for yourself.
-Take a look to the method documentation and it's options.
+choose each other serializer you wish to use. You need only some lines of code to adjust
+it for yourself. Take a look to the method documentation and it's options.
 
 =head1 METHODS
 
@@ -22,7 +22,7 @@ Call C<new()> to create a new IO::Socket::SIPC object.
 
     read_max_bytes  Set the maximum allowed bytes to read from the socket.
     send_max_bytes  Set the maximum allowed bytes to send over the socket.
-    favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL.
+    favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL or something else.
     deflate         Pass your own sub reference for serializion.
     inflate         Pass your own sub reference for deserializion.
 
@@ -111,6 +111,10 @@ socket handler.
 
 If a connection is accepted a new object is created related to the peer. The new object will
 be returned.
+
+In addition you can set a timeout if your favorite module provides a C<timeout()> method.
+
+    $sipc->accept(10)
 
 =head2 disconnect()
 
@@ -291,7 +295,7 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.01_01';
+our $VERSION = '0.01_02';
 
 use strict;
 use warnings;
@@ -317,7 +321,11 @@ sub new {
    if (!$self->{deflate} && !$self->{inflate}) {
       $self->_load_serializer;
    } elsif (ref($self->{deflate}) ne 'CODE' || ref($self->{inflate}) ne 'CODE') {
-      croak "$class: options deflate/inflate must be a code ref";
+      croak "$class: options deflate/inflate should be a code ref";
+   }
+
+   if ($self->{timeout} && $self->{timeout} !~ /^\d+\z/) {
+      croak "$class: invalid value for param timeout";
    }
 
    return $self;
@@ -348,8 +356,9 @@ sub connect {
 
 sub accept {
    my ($self, $timeout) = @_;
-   my $sock = $self->{sock} or return undef;
    my $class = ref($self);
+   croak "$class: invalid value for param timeout" if $timeout && $timeout !~ /^\d+\z/;
+   my $sock = $self->{sock} or return undef;
    my %options = %{$self};
    $sock->timeout($timeout) if defined $timeout;
    my $new = $class->_new(%{$self});
@@ -498,7 +507,7 @@ sub _bytes_calculator {
    return
       !$bytes || $bytes =~ /^unlimited\z/i
          ? DEFAULT_MAX_BYTES
-         : $bytes =~ /^\d+$/
+         : $bytes =~ /^\d+\z/
             ? $bytes
             : $bytes =~ /^(\d+)\s*kb{0,1}\z/i
                ? $1 * 1024
