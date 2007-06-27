@@ -1,0 +1,279 @@
+NAME
+    IO::Socket::SIPC - Serialized perl structures for inter process
+    communication.
+
+SYNOPSIS
+        use IO::Socket::SIPC;
+
+DESCRIPTION
+    This module makes it possible to transport perl structures between
+    processes over sockets. It wrappes your favorite IO::Socket module and
+    controls the amount of data over the socket. The default serializer is
+    Storable and the functions nfreeze() and thaw() but you can choose each
+    serialize you want. You need only some lines of code to adjust it for
+    yourself. Take a look to the method documentation and it's options.
+
+METHODS
+  new()
+    Call "new()" to create a new IO::Socket::SIPC object.
+
+        read_max_bytes  Set the maximum allowed bytes to read from the socket.
+        send_max_bytes  Set the maximum allowed bytes to send over the socket.
+        favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL.
+        deflate         Pass your own sub reference for serializion.
+        inflate         Pass your own sub reference for deserializion.
+
+    Defaults
+
+        read_max_bytes  unlimited
+        send_max_bytes  unlimited
+        favorite        IO::Socket::SSL
+        deflate         nfreeze of Storable
+        inflate         thaw of Storable (in a Safe compartment)
+
+    You can set your favorite socket handler. Example:
+
+        use IO::Socket::SIPC;
+
+        my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
+
+    The only mandatory thing is that your favorite must provide an
+    "accept()" method to wait for connections because "accept()" of
+    IP::Socket::SIPC used it.
+
+    Also you can set your own serializer if you like. Example:
+
+        use IO::Socket::SIPC;
+        use Convert::Bencode_XS;
+
+        my $sipc = IO::Socket::SIPC->new(
+            deflate => sub { Convert::Bencode_XS::bencode($_[0]) },
+            inflate => sub { Convert::Bencode_XS::bdecode($_[0]) },
+        );
+
+        # or
+
+        use IO::Socket::SIPC;
+        use JSON::PC;
+
+        my $sipc = IO::Socket::SIPC->new(
+            deflate => sub { JSON::PC::convert($_[0]) },
+            inflate => sub { JSON::PC::parse($_[0])   },
+        );
+
+    NOTE that the code that you handoff with deflate and inflate is embed in
+    an eval block and if it produce an error you can get the error string by
+    calling "errstr()". If you use the default deserializer of Storable the
+    data is deserialized in a Safe compartment. If you use another
+    deserializer you have to build your own Safe compartment within your
+    code ref!
+
+  read_max_bytes(), send_max_bytes()
+    Call both methods to increase or decrease the maximum bytes that the
+    server or client is allowed to "read()" or "send()". Possible sizes are
+    KB, MB and GB or just a number for bytes. It's not case sensitiv and you
+    can use "KB" or "kb" or just "k". If you want set the readable size to
+    unlimited then you can call both methods with 0 or "unlimited". The
+    default max send and read size is unlimited.
+
+    Here some notations examples
+
+        $sipc->read_max_bytes(1048576);
+        $sipc->read_max_bytes('1024k');
+        $sipc->read_max_bytes('1MB');
+
+        # unlimited
+        $sipc->read_max_bytes('unlimited');
+        $sipc->read_max_bytes(0);
+
+  connect()
+    Call "connect()" to connect to the socket. "connect()" just call "new()"
+    of your favorite socket creator and handoff all params to it. Example:
+
+        my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
+
+        $sipc->connect(
+           PeerAddr => 'localhost',
+           PeerPort => '50010',
+           Proto    => 'tcp',
+        );
+
+        # would call intern
+
+        IO::Socket::INET->new(@_);
+
+  accept()
+    If a Listen socket is defined then you can wait for connections with
+    "accept()". "accept()" is just a wrapper to the original "accept()"
+    method of your favorite socket handler.
+
+    If a connection is accepted a new object is created related to the peer.
+    The new object will be returned.
+
+  disconnect()
+    Call "disconnect()" to disconnect the current connection. "disconnect()"
+    calls "close()" on the socket that is referenced by the object.
+
+  sock()
+    Call "sock()" to access the object of your favorite module.
+
+    IO::Socket::INET examples:
+
+        $sipc->sock->timeout(10);
+        # or
+        $sipc->sock->peerhost;
+        # or
+        $sipc->sock->peerport;
+        # or
+        my $sock = $sipc->sock;
+        $sock->peerhost;
+
+    Note that if you use
+
+        while (my $c = $sipc->sock->accept) { }
+
+    that $c is the unwrapped IO::Socket::INET object and not a
+    IO::Socket::SIPC object.
+
+  send()
+    Call "send()" to send data over the socket to the peer. The data will be
+    serialized and packed before it sends to the peer. The data that is
+    handoff to "send()" must be a reference. If you handoff a string to
+    "send()" then it's a reference is created on the string.
+
+    "send()" returns the length of the serialized data or undef on errors or
+    if send_max_bytes is overtaken.
+
+  read()
+    Call "read()" to read data from the socket. The data will be unpacked
+    and deserialized before it is returned. Note that if you send a string
+    that the string is returned as a scalar reference.
+
+    If the maximum allowed bytes is overtaken or an error occured then
+    "read()" returns undef and aborts reading from the socket.
+
+  errstr()
+    Call "errstr()" to get the current error message if a method returns
+    undef. "errstr()" is not useable with "new()" because new fails by wrong
+    settings.
+
+    Note that "errstr()" do not contain the error message of your favorite
+    module, because it's to confused to find the right place for the error
+    message. As example the error message from IO::Socket::INET is provided
+    in $@ and from IO::Socket::SSL in "IO::Socket::SSL-"errstr()>. Maybe the
+    error message of your favorite is placed somewhere else. "errstr()"
+    contains only a short message of what happends in IO::Socket::SIPC. If
+    you want to know the right message of your favorite try something
+    like...
+
+        # IO::Socket::INET
+        $sipc->connect(%options) or die $sipc->errstr($@);
+
+        # IO::Socket::SSL
+        $sipc->connect(%options) or die $sipc->errstr($sipc->sock->errstr);
+
+        # Your::Favorite
+        $sipc->connect(%options) or die $sipc->errstr($YourFavoriteERRSTR);
+
+        # or just
+        $sipc->connect(%options) or die $sipc->errstr($!);
+
+EXAMPLES
+    Take a look to the examples directory.
+
+  Server example
+        use strict;
+        use warnings;
+        use IO::Socket::SIPC;
+
+        my $sipc = IO::Socket::SIPC->new();
+
+        $sipc->connect(
+           LocalAddr       => 'localhost',
+           LocalPort       => 50010,
+           Proto           => 'tcp',
+           Listen          => 10, 
+           Reuse           => 1,
+           SSL_verify_mode => 0x01,
+           SSL_ca_file     => '../certs/ca.pem',
+           SSL_cert_file   => '../certs/servercert.pem',
+           SSL_key_file    => '../certs/serverkey.pem',
+           SSL_passwd_cb   => sub {return "megaraptor"},
+        ) or die $sipc->errstr($sipc->sock->errstr);
+
+        warn "server initialized\n";
+
+        $sipc->sock->timeout(10);
+
+        while ( 1 ) { 
+           while (my $client = $sipc->accept()) { 
+              print "connect from client: ", $client->sock->peerhost, "\n";
+              my $request = $client->read or die $client->errstr($client->sock->errstr);
+              next unless $$request;
+              chomp($$request);
+              warn "client says: $$request\n";
+              $client->send({ foo => 'is foo', bar => 'is bar', baz => 'is baz'}) or die $client->errstr($client->sock->errstr);
+              $client->disconnect or die $client->errstr($!);
+           }   
+           warn "server runs on a timeout, re-listen on socket\n";
+        }
+
+        $sipc->disconnect or die $sipc->errstr($!);
+
+  Client example
+        use strict;
+        use warnings;
+        use Data::Dumper;
+        use IO::Socket::SIPC;
+
+        my $sipc = IO::Socket::SIPC->new();
+
+        $sipc->connect(
+           PeerAddr        => 'localhost',
+           PeerPort        => 50010,
+           Proto           => 'tcp',
+           SSL_use_cert    => 1,
+           SSL_verify_mode => 0x01,
+           SSL_ca_file     => '../certs/ca.pem',
+           SSL_cert_file   => '../certs/clientcert.pem',
+           SSL_key_file    => '../certs/clientkey.pem',
+           SSL_passwd_cb   => sub { return "pyroraptor" }
+        ) or die $sipc->errstr($sipc->sock->errstr);
+
+        warn "client connected to server\n";
+
+        $sipc->send("Hello server, gimme some data :-)\n") or die $sipc->errstr($sipc->sock->errstr);
+        my $answer = $sipc->read or die $sipc->errstr($sipc->sock->errstr);
+        warn "server data: \n";
+        warn Dumper($answer);
+        $sipc->disconnect or die $sipc->errstr($!);
+
+PREREQUISITES
+        UNIVERSAL           -  to check for routines with can()
+        UNIVERSAL::require  -  to post load favorite modules
+        IO::Socket::SSL     -  for the test suite and examples
+        Storable            -  the default serializer and deserializer
+        Safe                -  deserialize (Storable::thaw) in a safe compartment
+
+EXPORTS
+    No exports.
+
+REPORT BUGS
+    Please report all bugs to <jschulz.cpan(at)bloonix.de>.
+
+AUTHOR
+    Jonny Schulz <jschulz.cpan(at)bloonix.de>.
+
+QUESTIONS
+    Do you have any questions or ideas?
+
+    MAIL: <jschulz.cpan(at)bloonix.de>
+
+    IRC: irc.perl.org#perlde
+
+COPYRIGHT
+    Copyright (C) 2007 by Jonny Schulz. All rights reserved.
+
+    This program is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+
