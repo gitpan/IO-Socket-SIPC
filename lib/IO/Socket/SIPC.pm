@@ -10,9 +10,10 @@ IO::Socket::SIPC - Serialized perl structures for inter process communication.
 
 This module makes it possible to transport perl structures between processes over sockets.
 It wrappes your favorite IO::Socket module and controls the amount of data over the socket.
-The default serializer is Storable and the functions nfreeze() and thaw() but you can
-choose each other serializer you wish to use. You need only some lines of code to adjust
-it for yourself. Take a look to the method documentation and it's options.
+The default serializer is Storable with nfreeze() and thaw() but you can choose each other
+serializer you wish to use. You need only some lines of code to adjust it for yourself.
+In addition it's possible to use a checksum to check the integrity of the transportet data.
+Take a look to the method section.
 
 =head1 METHODS
 
@@ -25,14 +26,18 @@ Call C<new()> to create a new IO::Socket::SIPC object.
     favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL or something else.
     deflate         Pass your own sub reference for serializion.
     inflate         Pass your own sub reference for deserializion.
+    use_check_sum   Check each transport with a MD5 sum.
+    gen_check_sum   Set up your own checksum generator.
 
 Defaults
 
     read_max_bytes  unlimited
     send_max_bytes  unlimited
-    favorite        IO::Socket::SSL
-    deflate         nfreeze of Storable
-    inflate         thaw of Storable (in a Safe compartment)
+    favorite        IO::Socket::INET
+    deflate         nfreeze() of Storable
+    inflate         thaw() of Storable (in a Safe compartment)
+    gen_check_sum   md5() of Digest::MD5
+    use_check_sum   enabled (disable it with 0)
 
 You can set your favorite socket handler. Example:
 
@@ -67,6 +72,12 @@ NOTE that the code that you handoff with deflate and inflate is embed in an eval
 it produce an error you can get the error string by calling C<errstr()>. If you use the default
 deserializer of Storable the data is deserialized in a Safe compartment. If you use another
 deserializer you have to build your own Safe compartment within your code ref!
+
+You can set your own checksum generator if you like (dummy example):
+
+    my $sipc = IO::Socket::SIPC->new(
+       gen_check_sum => sub { Your::Fav::gen_sum($_[0]) }
+    );
 
 =head2 read_max_bytes(), send_max_bytes()
 
@@ -149,14 +160,13 @@ and packed before it sends to the peer. The data that is handoff to C<send()> mu
 a reference. If you handoff a string to C<send()> then it's a reference is created
 on the string.
 
-C<send()> returns the length of the serialized data or undef on errors or if send_max_bytes
-is overtaken.
+C<send()> returns undef on errors or if send_max_bytes is overtaken.
 
 =head2 read()
 
 Call C<read()> to read data from the socket. The data will be unpacked and deserialized
-before it is returned. Note that if you send a string that the string is returned as a
-scalar reference.
+before it is returned. Note that if you C<send()> a string that the string is C<read()>
+as a scalar reference.
 
 If the maximum allowed bytes is overtaken or an error occured then C<read()> returns undef and
 aborts reading from the socket.
@@ -261,7 +271,7 @@ Take a look to the examples directory.
 
     UNIVERSAL           -  to check for routines with can()
     UNIVERSAL::require  -  to post load favorite modules
-    IO::Socket::SSL     -  for the test suite and examples
+    Digest::MD5         -  to check the data before and after transports
     Storable            -  the default serializer and deserializer
     Safe                -  deserialize (Storable::thaw) in a safe compartment
 
@@ -285,6 +295,11 @@ MAIL: <jschulz.cpan(at)bloonix.de>
 
 IRC: irc.perl.org#perlde
 
+=head1 TODO
+
+    * do you have any ideas?
+    * maybe another implementation of sum checks
+
 =head1 COPYRIGHT
 
 Copyright (C) 2007 by Jonny Schulz. All rights reserved.
@@ -295,7 +310,7 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.01_02';
+our $VERSION = '0.01_03';
 
 use strict;
 use warnings;
@@ -304,8 +319,10 @@ use UNIVERSAL::require;
 use Carp qw/croak/;
 
 # the default send + read bytes is unlimited
-use constant DEFAULT_IO_SOCKET => 'IO::Socket::SSL';
-use constant DEFAULT_MAX_BYTES => 0;
+use constant DEFAULT_IO_SOCKET  => 'IO::Socket::INET';
+use constant DEFAULT_MAX_BYTES  => 0;
+use constant USE_CHECK_SUM      => 1;
+use constant READ_BUFFER_LENGTH => 16384;
 
 # to safe error messages
 $IO::Socket::SIPC::ERRSTR = defined;
@@ -316,12 +333,17 @@ sub new {
 
    $self->read_max_bytes($self->{read_max_bytes});
    $self->send_max_bytes($self->{send_max_bytes});
+   $self->_load_digest($self->{use_check_sum}) unless $self->{gen_check_sum};
    $self->_load_favorite;
 
    if (!$self->{deflate} && !$self->{inflate}) {
       $self->_load_serializer;
    } elsif (ref($self->{deflate}) ne 'CODE' || ref($self->{inflate}) ne 'CODE') {
-      croak "$class: options deflate/inflate should be a code ref";
+      croak "$class: options deflate/inflate expects a code ref";
+   }
+
+   if ($self->{gen_check_sum} && ref($self->{gen_check_sum}) ne 'CODE') {
+      croak "$class: option gen_check_sum expect a code ref";
    }
 
    if ($self->{timeout} && $self->{timeout} !~ /^\d+\z/) {
@@ -376,37 +398,80 @@ sub disconnect {
 sub send {
    my ($self, $data) = @_;
    my $maxbyt = $self->{send_max_bytes};
-   my $sock = $self->{sock};
+   my $sock   = $self->{sock};
+
+   # --------------------------------------------------------
+   # at first we serializing data and reuse $data all time to
+   # because we don't like to blow away memory and if $data
+   # isn't a reference we force it because Storable::nfreeze  
+   # just works with references
+   # --------------------------------------------------------
+
    $data = $self->_deflate(ref($data) ? $data : \$data) or return undef;
+
+   # -------------------------------------------------------
+   # the length is first use to check if the serialized data
+   # exceeds send_max_bytes, because read_max_bytes checks
+   # the serialized length as well
+   # -------------------------------------------------------
+
    my $length = length($data);
+
    return $self->_raise_error("the data length ($length bytes) exceeds send_max_bytes")
       if $maxbyt && $length > $maxbyt;
-   my $packet = pack("N/a*", $data);
-   print $sock $packet or return $self->_raise_error("unable to send data");
-   return $length;
+
+   # ------------------------------------------------------
+   # the package lenght is needed to compare how many bytes
+   # is written to the socket
+   # ------------------------------------------------------
+
+   if ($self->{use_check_sum}) {
+      my $checksum = $self->_gen_check_sum($data) or return undef;
+      $checksum   = pack("n/a*", $checksum);
+      my $pkglen  = length($checksum);
+      $self->_send(\$checksum, $pkglen) or return undef;
+   }
+
+   # ----------------------------------------------
+   # pack the data. 4 bytes should be really enough
+   # ----------------------------------------------
+
+   $data   = pack("N/a*", $data);
+   $length = length($data);
+
+   $self->_send(\$data, $length) or return undef;
+
+   return 1;
 }
 
 sub read {
    my $self   = shift;
    my $sock   = $self->{sock};
    my $maxbyt = $self->{read_max_bytes};
+   my $recsum = ();
 
-   # ------------------------------------------------------------
-   # At first read 4 bytes from the buffer. This 4 bytes contains
+   # ------------------------------------------------------
+   # at first we read the md5sum if option use_check_sum is true
+   # ------------------------------------------------------
+
+   if ($self->{use_check_sum}) {
+      my $packet = $self->_read(2) or return undef;
+      my $sumlen = unpack("n", $$packet);
+      $recsum    = $self->_read($sumlen) or return undef;
+   }
+
+   # -----------------------------------------------------------
+   # then we read 4 bytes from the buffer. This 4 bytes contains
    # the length of the rest of the data in the buffer
-   # ------------------------------------------------------------
+   # -----------------------------------------------------------
 
-   my $bytes = read($sock, my $buffer, 4);
-
-   return $self->_raise_error("read only $bytes/4 bytes from buffer")
-      unless 4 == $bytes;
-
-   my $length = unpack("N", $buffer)
+   my $buffer = $self->_read(4) or return undef;
+   my $length = unpack("N", $$buffer)
       or return $self->_raise_error("no data in buffer");
 
-   # -----------------------------------------------------
-   # $maxbyt is the absolute allowed maximum bytes
-   # -----------------------------------------------------
+   # ----------------------------------------------
+   # $maxbyt is the absolute allowed maximum length
+   # ----------------------------------------------
 
    return $self->_raise_error("the buffer length ($length bytes) exceeds read_max_bytes")
       if $maxbyt && $length > $maxbyt;
@@ -415,22 +480,33 @@ sub read {
    # now read the rest from the socket and reset some variables
    # ----------------------------------------------------------
 
-   ($buffer, $bytes) = ('', 0);
-   my $rdsz = $length < 16384 ? $length : 16384;
-   my $rest = $length;
+   my $rdsz  = $length < READ_BUFFER_LENGTH ? $length : READ_BUFFER_LENGTH;
+   my $rest  = $length;
+   my $bytes = 0;
+   $buffer   = ''; # reuse $buffer
 
-   while (my $byt = read($sock, my $buf, $rdsz)) {
+   while (my $byt = sysread($sock, my $buf, $rdsz)) {
       return $self->_raise_error("read only $byt/$rdsz bytes from buffer") unless $byt == $rdsz;
       $bytes  += $byt;     # to compare later how much we read and what we expect to read
       $buffer .= $buf;     # concat the data pieces
-      $rest   -= $byt;     # what is the rest
-      $rdsz    = $rest
-         if $rest < 16384; # otherwise read() hangs if we wants to read to much
+      $rest   -= $byt;     # this is the rest we have to read
+      $rdsz    = $rest     # otherwise sysread() hangs if we wants to read to much
+         if $rest < READ_BUFFER_LENGTH;
       last unless $rest;   # jump out if we read all data
    }
 
    return $self->_raise_error("read only $bytes/$length bytes from socket")
       unless $bytes == $length;
+
+   # ---------------------------------------------
+   # checking the md5sum if option use_check_sum is true
+   # ----------------------------------------------
+
+   if ($self->{use_check_sum}) {
+      my $gensum = $self->_gen_check_sum($buffer) or return undef;
+      return $self->_raise_error("the checksums are not identical")
+         unless $$recsum eq $gensum; # careful... $recsum is a scalar reference
+   }
 
    # ------------------
    # deserializing data
@@ -448,6 +524,34 @@ sub errstr {
    return "$class: " . $IO::Socket::SIPC::ERRSTR;
 }
 
+# -------------
+# private stuff
+# -------------
+
+sub _new {
+   my $class = shift;
+   my $args  = ref($_[0]) eq 'HASH' ? $_[0] : { @_ };
+   return bless $args, $class;
+}
+
+sub _send {
+   my ($self, $packet, $length) = @_;
+   my $sock = $self->{sock};
+   my $written = syswrite($sock, $$packet, $length);
+   return $self->_raise_error("send only $written/$length bytes over socket")
+       unless $written == $length;
+   return 1;
+}
+
+sub _read {
+   my ($self, $length) = @_;
+   my $sock = $self->{sock};
+   my $read = sysread($sock, my $packet, $length);
+   return $self->_raise_error("read only $read/$length bytes from socket")
+      unless $read == $length;
+   return \$packet;
+}
+
 sub _deflate {
    my ($self, $data) = @_;
    my $deflated = ();
@@ -462,14 +566,11 @@ sub _inflate {
    return $@ ? $self->_raise_error("an inflate error occurs: ".$@) : $inflated;
 }
 
-# -------------
-# private stuff
-# -------------
-
-sub _new {
-   my $class = shift;
-   my $args  = ref($_[0]) eq 'HASH' ? $_[0] : { @_ };
-   return bless $args, $class;
+sub _gen_check_sum {
+   my ($self, $data) = @_;
+   my $checksum = ();
+   eval { $checksum = $self->{gen_check_sum}($data) };
+   return $@ ? $self->_raise_error("an gen_check_sum error occurs: ".$@) : $checksum;
 }
 
 sub _load_serializer {
@@ -485,7 +586,7 @@ sub _load_serializer {
        no warnings 'once';
        $Storable::Deparse = 1;
        $Storable::Eval = sub { $safe->reval($_[0]) };
-   }  # end no warnings 'once' block
+   }
 
    $self->{deflate} = sub { Storable::nfreeze($_[0]) };
    $self->{inflate} = sub { Storable::thaw($_[0]) };
@@ -516,6 +617,20 @@ sub _bytes_calculator {
                   : $bytes =~ /^(\d+)\s*gb{0,1}\z/i
                      ? $1 * 1073741824
                      : croak "$class: invalid bytes specification for " . (caller(0))[3];
+}
+
+sub _load_digest {
+   my ($self, $check_sum) = @_;
+   my $class = ref($self);
+   $check_sum = USE_CHECK_SUM unless defined $check_sum;
+   croak "$class: invalid value for param use_check_sum"
+      unless $check_sum =~ /^[10]\z/;
+   if ($check_sum) {
+      'Digest::MD5'->require;
+      $self->{gen_check_sum} = \&Digest::MD5::md5_hex;
+      #$self->{gen_check_sum} = \&Digest::MD5::md5;
+   }
+   $self->{use_check_sum} = 1;
 }
 
 sub _raise_error {

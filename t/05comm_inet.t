@@ -3,12 +3,11 @@ use warnings;
 use Test::More tests => 10;
 use IO::Socket::SIPC;
 
-my $fav  = 'IO::Socket::INET';
 my $addr = '127.0.0.1';
 my $port = ();
 
 {  # THE SERVER
-   my $socket = IO::Socket::SIPC->new(favorite => $fav);
+   my $socket = IO::Socket::SIPC->new();
 
    ok($socket, "new object");
 
@@ -55,7 +54,7 @@ my $port = ();
 sleep 1;
 
 {  # THE CLIENT
-   my $socket = IO::Socket::SIPC->new(favorite => $fav);
+   my $socket = IO::Socket::SIPC->new();
 
    $socket->connect(
       PeerAddr        => $addr,

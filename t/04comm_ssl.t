@@ -1,14 +1,23 @@
 use strict;
 use warnings;
-use Test::More tests => 11;
+use Test::More;
 use IO::Socket::SIPC;
+
+eval { use IO::Socket::SSL };
+
+if ($@) {
+   plan skip_all => "unfortunately I'm unable to test IO::Socket::SSL because it's not installed";
+   exit(0);
+}
+
+plan tests => 11;
 
 unless (-d "certs") {
     if (-d "../certs") {
         chdir "..";
     } else {
         ok(0, "Find certs");
-        die "Please run this example from the IO::Socket::SIPC distribution directory!\n";
+        die "unable to find certs directory";
     }
 }
 
@@ -18,7 +27,7 @@ my $addr = '127.0.0.1';
 my $port = ();
 
 {  # THE SERVER
-   my $socket = IO::Socket::SIPC->new();
+   my $socket = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
 
    ok($socket, "new object");
 
@@ -70,7 +79,7 @@ my $port = ();
 sleep 1;
 
 {  # THE CLIENT
-   my $socket = IO::Socket::SIPC->new();
+   my $socket = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
 
    $socket->connect(
       PeerAddr        => $addr,

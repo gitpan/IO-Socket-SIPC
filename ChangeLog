@@ -1,3 +1,10 @@
+0.01_03 Released at 2007-06-29.
+        Default socket is not IO::Socket::INET, not IO::Socket::SSL.
+        Added Digest::MD5 to generate an md5sum for all transports.
+          Also it's possible to disable this checks or set an own and
+          and faster checksum generator with option gen_check_sum.
+        Added different private functions for a better code structure
+          like _send, _read, _gen_check_sum and _load_digest.
 0.01_02	Released at 2007-06-27.
         Some code and pod changes.
 0.01_01	Released at 2007-06-27.

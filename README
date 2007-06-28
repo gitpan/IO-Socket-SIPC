@@ -9,10 +9,11 @@ DESCRIPTION
     This module makes it possible to transport perl structures between
     processes over sockets. It wrappes your favorite IO::Socket module and
     controls the amount of data over the socket. The default serializer is
-    Storable and the functions nfreeze() and thaw() but you can choose each
-    other serializer you wish to use. You need only some lines of code to
-    adjust it for yourself. Take a look to the method documentation and it's
-    options.
+    Storable with nfreeze() and thaw() but you can choose each other
+    serializer you wish to use. You need only some lines of code to adjust
+    it for yourself. In addition it's possible to use a checksum to check
+    the integrity of the transportet data. Take a look to the method
+    section.
 
 METHODS
   new()
@@ -23,14 +24,18 @@ METHODS
         favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL or something else.
         deflate         Pass your own sub reference for serializion.
         inflate         Pass your own sub reference for deserializion.
+        use_check_sum   Check each transport with a MD5 sum.
+        gen_check_sum   Set up your own checksum generator.
 
     Defaults
 
         read_max_bytes  unlimited
         send_max_bytes  unlimited
-        favorite        IO::Socket::SSL
-        deflate         nfreeze of Storable
-        inflate         thaw of Storable (in a Safe compartment)
+        favorite        IO::Socket::INET
+        deflate         nfreeze() of Storable
+        inflate         thaw() of Storable (in a Safe compartment)
+        gen_check_sum   md5() of Digest::MD5
+        use_check_sum   enabled (disable it with 0)
 
     You can set your favorite socket handler. Example:
 
@@ -68,6 +73,12 @@ METHODS
     data is deserialized in a Safe compartment. If you use another
     deserializer you have to build your own Safe compartment within your
     code ref!
+
+    You can set your own checksum generator if you like (dummy example):
+
+        my $sipc = IO::Socket::SIPC->new(
+           gen_check_sum => sub { Your::Fav::gen_sum($_[0]) }
+        );
 
   read_max_bytes(), send_max_bytes()
     Call both methods to increase or decrease the maximum bytes that the
@@ -147,13 +158,12 @@ METHODS
     handoff to "send()" must be a reference. If you handoff a string to
     "send()" then it's a reference is created on the string.
 
-    "send()" returns the length of the serialized data or undef on errors or
-    if send_max_bytes is overtaken.
+    "send()" returns undef on errors or if send_max_bytes is overtaken.
 
   read()
     Call "read()" to read data from the socket. The data will be unpacked
-    and deserialized before it is returned. Note that if you send a string
-    that the string is returned as a scalar reference.
+    and deserialized before it is returned. Note that if you "send()" a
+    string that the string is "read()" as a scalar reference.
 
     If the maximum allowed bytes is overtaken or an error occured then
     "read()" returns undef and aborts reading from the socket.
@@ -257,7 +267,7 @@ EXAMPLES
 PREREQUISITES
         UNIVERSAL           -  to check for routines with can()
         UNIVERSAL::require  -  to post load favorite modules
-        IO::Socket::SSL     -  for the test suite and examples
+        Digest::MD5         -  to check the data before and after transports
         Storable            -  the default serializer and deserializer
         Safe                -  deserialize (Storable::thaw) in a safe compartment
 
@@ -276,6 +286,10 @@ QUESTIONS
     MAIL: <jschulz.cpan(at)bloonix.de>
 
     IRC: irc.perl.org#perlde
+
+TODO
+        * do you have any ideas?
+        * maybe another implementation of sum checks
 
 COPYRIGHT
     Copyright (C) 2007 by Jonny Schulz. All rights reserved.
