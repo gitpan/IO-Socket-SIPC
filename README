@@ -154,16 +154,26 @@ METHODS
 
   send()
     Call "send()" to send data over the socket to the peer. The data will be
-    serialized and packed before it sends to the peer. The data that is
-    handoff to "send()" must be a reference. If you handoff a string to
-    "send()" then it's a reference is created on the string.
+    serialized and packed before it sends to the peer. If you use the
+    default serializer that you must handoff an reference, otherwise an
+    error occured because "nfreeze()" of Storable just works with
+    references. If you want to send a raw string and disable serialization
+    you can set a 1 as second param.
+
+        $sipc->send("No serialization", 1);
+        $sipc->send(\"With serialization");
+
+    If you use your own serializer then consult the documentation if the
+    serializer needs a reference or if a scalar works as well.
 
     "send()" returns undef on errors or if send_max_bytes is overtaken.
 
   read()
     Call "read()" to read data from the socket. The data will be unpacked
-    and deserialized before it is returned. Note that if you "send()" a
-    string that the string is "read()" as a scalar reference.
+    and deserialized before it is returned. To disable deserialization and
+    read a string from the socket just set a 1 as param.
+
+        my $string = $sipc->read(1); # disable deserialization
 
     If the maximum allowed bytes is overtaken or an error occured then
     "read()" returns undef and aborts reading from the socket.

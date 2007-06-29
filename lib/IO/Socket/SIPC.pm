@@ -156,17 +156,26 @@ that $c is the unwrapped IO::Socket::INET object and not a IO::Socket::SIPC obje
 =head2 send()
 
 Call C<send()> to send data over the socket to the peer. The data will be serialized
-and packed before it sends to the peer. The data that is handoff to C<send()> must be
-a reference. If you handoff a string to C<send()> then it's a reference is created
-on the string.
+and packed before it sends to the peer. If you use the default serializer that you
+must handoff an reference, otherwise an error occured because C<nfreeze()> of Storable
+just works with references. If you want to send a raw string and disable serialization
+you can set a 1 as second param.
+
+    $sipc->send("No serialization", 1);
+    $sipc->send(\"With serialization");
+
+If you use your own serializer then consult the documentation if the serializer needs
+a reference or if a scalar works as well.
 
 C<send()> returns undef on errors or if send_max_bytes is overtaken.
 
 =head2 read()
 
 Call C<read()> to read data from the socket. The data will be unpacked and deserialized
-before it is returned. Note that if you C<send()> a string that the string is C<read()>
-as a scalar reference.
+before it is returned. To disable deserialization and read a string from the socket just
+set a 1 as param.
+
+    my $string = $sipc->read(1); # disable deserialization
 
 If the maximum allowed bytes is overtaken or an error occured then C<read()> returns undef and
 aborts reading from the socket.
@@ -310,7 +319,7 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.01_03';
+our $VERSION = '0.01_04';
 
 use strict;
 use warnings;
@@ -322,10 +331,10 @@ use Carp qw/croak/;
 use constant DEFAULT_IO_SOCKET  => 'IO::Socket::INET';
 use constant DEFAULT_MAX_BYTES  => 0;
 use constant USE_CHECK_SUM      => 1;
-use constant READ_BUFFER_LENGTH => 16384;
 
-# to safe error messages
+# globals
 $IO::Socket::SIPC::ERRSTR = defined;
+$IO::Socket::SIPC::MAXBUF = 16384;
 
 sub new {
    my $class = shift;
@@ -396,7 +405,7 @@ sub disconnect {
 }
 
 sub send {
-   my ($self, $data) = @_;
+   my ($self, $data, $no_deflate) = @_;
    my $maxbyt = $self->{send_max_bytes};
    my $sock   = $self->{sock};
 
@@ -407,7 +416,10 @@ sub send {
    # just works with references
    # --------------------------------------------------------
 
-   $data = $self->_deflate(ref($data) ? $data : \$data) or return undef;
+   unless ($no_deflate) {
+      $data = $self->_deflate($data)
+         or return undef;
+   }
 
    # -------------------------------------------------------
    # the length is first use to check if the serialized data
@@ -420,44 +432,41 @@ sub send {
    return $self->_raise_error("the data length ($length bytes) exceeds send_max_bytes")
       if $maxbyt && $length > $maxbyt;
 
-   # ------------------------------------------------------
-   # the package lenght is needed to compare how many bytes
-   # is written to the socket
-   # ------------------------------------------------------
+   # ------------------------------------------------------------
+   # send a checksum of data to the peer if use_check_sum is true
+   # ------------------------------------------------------------
 
    if ($self->{use_check_sum}) {
       my $checksum = $self->_gen_check_sum($data) or return undef;
-      $checksum   = pack("n/a*", $checksum);
-      my $pkglen  = length($checksum);
-      $self->_send(\$checksum, $pkglen) or return undef;
+      $checksum    = pack("n/a*", $checksum); # 2 bytes
+      $self->_send(\$checksum) or return undef;
    }
 
-   # ----------------------------------------------
-   # pack the data. 4 bytes should be really enough
-   # ----------------------------------------------
+   # ----------------------------------------------------------
+   # pack the data. 4 bytes should be really enough to identify
+   # the data length. if not, then we got a problem here ;-)
+   # ----------------------------------------------------------
 
-   $data   = pack("N/a*", $data);
-   $length = length($data);
-
-   $self->_send(\$data, $length) or return undef;
+   $data = pack("N/a*", $data);
+   $self->_send(\$data) or return undef;
 
    return 1;
 }
 
 sub read {
-   my $self   = shift;
-   my $sock   = $self->{sock};
-   my $maxbyt = $self->{read_max_bytes};
-   my $recsum = ();
+   my ($self, $no_inflate) = @_;
+   my $sock    = $self->{sock};
+   my $maxbyt  = $self->{read_max_bytes};
+   my $recvsum = ();
 
-   # ------------------------------------------------------
-   # at first we read the md5sum if option use_check_sum is true
-   # ------------------------------------------------------
+   # -------------------------------------------------------------
+   # At first we read the checksum if option use_check_sum is true
+   # -------------------------------------------------------------
 
    if ($self->{use_check_sum}) {
       my $packet = $self->_read(2) or return undef;
-      my $sumlen = unpack("n", $$packet);
-      $recsum    = $self->_read($sumlen) or return undef;
+      my $sumlen = unpack("n", $packet);
+      $recvsum   = $self->_read($sumlen) or return undef;
    }
 
    # -----------------------------------------------------------
@@ -466,7 +475,7 @@ sub read {
    # -----------------------------------------------------------
 
    my $buffer = $self->_read(4) or return undef;
-   my $length = unpack("N", $$buffer)
+   my $length = unpack("N", $buffer)
       or return $self->_raise_error("no data in buffer");
 
    # ----------------------------------------------
@@ -476,22 +485,27 @@ sub read {
    return $self->_raise_error("the buffer length ($length bytes) exceeds read_max_bytes")
       if $maxbyt && $length > $maxbyt;
 
-   # ----------------------------------------------------------
-   # now read the rest from the socket and reset some variables
-   # ----------------------------------------------------------
+   # ---------------------------------
+   # now read the rest from the socket
+   # ---------------------------------
 
-   my $rdsz  = $length < READ_BUFFER_LENGTH ? $length : READ_BUFFER_LENGTH;
-   my $rest  = $length;
-   my $bytes = 0;
-   $buffer   = ''; # reuse $buffer
+   my $rdsz  = $length < $IO::Socket::SIPC::MAXBUF ? $length : $IO::Socket::SIPC::MAXBUF;
+   my $rest  = $length; # to calculate the rest
+   my $bytes = 0;       # total bytes
+   $buffer   = '';      # reuse $buffer
 
-   while (my $byt = sysread($sock, my $buf, $rdsz)) {
+   # ----------------------------------
+   # we need to read the data in a loop
+   # to avoid an buffer overflow
+   # ----------------------------------
+
+   while (my $byt = CORE::read($sock, my $buf, $rdsz)) {
       return $self->_raise_error("read only $byt/$rdsz bytes from buffer") unless $byt == $rdsz;
       $bytes  += $byt;     # to compare later how much we read and what we expect to read
       $buffer .= $buf;     # concat the data pieces
       $rest   -= $byt;     # this is the rest we have to read
-      $rdsz    = $rest     # otherwise sysread() hangs if we wants to read to much
-         if $rest < READ_BUFFER_LENGTH;
+      $rdsz    = $rest     # otherwise CORE::read() hangs if we wants to read to much
+         if $rest < $IO::Socket::SIPC::MAXBUF;
       last unless $rest;   # jump out if we read all data
    }
 
@@ -505,17 +519,20 @@ sub read {
    if ($self->{use_check_sum}) {
       my $gensum = $self->_gen_check_sum($buffer) or return undef;
       return $self->_raise_error("the checksums are not identical")
-         unless $$recsum eq $gensum; # careful... $recsum is a scalar reference
+         unless $recvsum eq $gensum; # careful... $recvsum is a scalar reference
    }
 
-   # ------------------
-   # deserializing data
-   # ------------------
+   # ------------------------------------------
+   # deserializing data if $no_inflate is false
+   # ------------------------------------------
 
-   return $self->_inflate($buffer);
+   return $no_inflate ? $buffer : $self->_inflate($buffer);
 }
 
-sub sock { return $_[0]->{sock} || $_[0]->{favorite} }
+sub sock {
+   # return object || class
+   return $_[0]->{sock} || $_[0]->{favorite}
+}
 
 sub errstr {
    my ($self, $msg) = @_;
@@ -535,8 +552,9 @@ sub _new {
 }
 
 sub _send {
-   my ($self, $packet, $length) = @_;
+   my ($self, $packet) = @_;
    my $sock = $self->{sock};
+   my $length = length($$packet);
    my $written = syswrite($sock, $$packet, $length);
    return $self->_raise_error("send only $written/$length bytes over socket")
        unless $written == $length;
@@ -546,10 +564,10 @@ sub _send {
 sub _read {
    my ($self, $length) = @_;
    my $sock = $self->{sock};
-   my $read = sysread($sock, my $packet, $length);
+   my $read = CORE::read($sock, my $packet, $length);
    return $self->_raise_error("read only $read/$length bytes from socket")
       unless $read == $length;
-   return \$packet;
+   return $packet;
 }
 
 sub _deflate {
@@ -627,8 +645,7 @@ sub _load_digest {
       unless $check_sum =~ /^[10]\z/;
    if ($check_sum) {
       'Digest::MD5'->require;
-      $self->{gen_check_sum} = \&Digest::MD5::md5_hex;
-      #$self->{gen_check_sum} = \&Digest::MD5::md5;
+      $self->{gen_check_sum} = \&Digest::MD5::md5;
    }
    $self->{use_check_sum} = 1;
 }

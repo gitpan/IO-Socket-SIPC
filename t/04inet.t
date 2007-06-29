@@ -1,13 +1,13 @@
 use strict;
 use warnings;
-use Test::More tests => 10;
+use Test::More tests => 12;
 use IO::Socket::SIPC;
 
 my $addr = '127.0.0.1';
 my $port = ();
 
 {  # THE SERVER
-   my $socket = IO::Socket::SIPC->new();
+   my $socket = IO::Socket::SIPC->new( read_max_bytes => 100 );
 
    ok($socket, "new object");
 
@@ -29,14 +29,16 @@ my $port = ();
       my $client = $socket->accept or die $socket->errstr;
       ok(1, "accept connect");
 
+      my $string = $client->read(1) or die $client->errstr;
+
+      if ($string eq 'foo-bar-baz') {
+         ok(1, "read string");
+      } else {
+         ok(0, "read string");
+      }
+
       my $struct = $client->read or die $client->errstr;
       ok(1, "read struct");
-
-      $client->disconnect or die $client->errstr;
-      ok(1, "disconnect client");
-
-      $socket->disconnect or die $socket->errstr;
-      ok(1, "disconnect socket");
 
       my $ok = 0;
       $ok = 1 if $struct->{foo} && $struct->{foo} eq 'foo'
@@ -44,6 +46,20 @@ my $port = ();
               && $struct->{baz} && $struct->{baz} eq 'baz';
 
       ok($ok, "deserialize struct");
+
+      my $to_much = $client->read;
+
+      if ($client->errstr =~ /the buffer length \(\d+ bytes\) exceeds read_max_bytes/) {
+         ok(1, "read_max_bytes");
+      } elsif ($to_much) {
+         ok(0, "read_max_bytes");
+      }
+
+      $client->disconnect or die $client->errstr;
+      ok(1, "disconnect client");
+
+      $socket->disconnect or die $socket->errstr;
+      ok(1, "disconnect socket");
 
       waitpid($pid, 0);
       ok(!$?, "waitpid");
@@ -62,7 +78,11 @@ sleep 1;
       Proto           => 'tcp',
    ) or die $socket->errstr($!);
 
-   my %hash = (foo => 'foo', bar => 'bar', baz => 'baz');
-   $socket->send(\%hash) or die $socket->errstr;
+   my $string  = ('foo-bar-baz');
+   my %struct  = (foo => 'foo', bar => 'bar', baz => 'baz');
+   my $to_much = 'x' x 101;
+   $socket->send($string, 1) or die $socket->errstr;
+   $socket->send(\%struct) or die $socket->errstr;
+   $socket->send(\$to_much) or die $socket->errstr;
    $socket->disconnect or die $socket->errstr;
 }

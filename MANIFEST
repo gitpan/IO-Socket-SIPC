@@ -19,5 +19,4 @@ t/00use.t
 t/01pod.t
 t/02pod-coverage.t
 t/03bytes_cal.t
-t/04comm_ssl.t
-t/05comm_inet.t
+t/04inet.t

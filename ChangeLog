@@ -1,3 +1,7 @@
+0.01_04 Released at 2007-06-29.
+        Added new param to read() and send(). Now it's possible to
+          give an 1 as param, it disables serializion for this one time.
+        Did some other improvements.
 0.01_03 Released at 2007-06-29.
         Default socket is not IO::Socket::INET, not IO::Socket::SSL.
         Added Digest::MD5 to generate an md5sum for all transports.
