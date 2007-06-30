@@ -1,6 +1,6 @@
 =head1 NAME
 
-IO::Socket::SIPC - Serialized perl structures for inter process communication.
+IO::Socket::SIPC - Serialize perl structures for inter process communication.
 
 =head1 SYNOPSIS
 
@@ -11,9 +11,9 @@ IO::Socket::SIPC - Serialized perl structures for inter process communication.
 This module makes it possible to transport perl structures between processes over sockets.
 It wrappes your favorite IO::Socket module and controls the amount of data over the socket.
 The default serializer is Storable with nfreeze() and thaw() but you can choose each other
-serializer you wish to use. You need only some lines of code to adjust it for yourself.
-In addition it's possible to use a checksum to check the integrity of the transportet data.
-Take a look to the method section.
+serializer you wish to use. You have just follow some restrictions and need only some lines
+of code to adjust it for yourself. In addition it's possible to use a checksum to check the
+integrity of the transported data. Take a look to the method section.
 
 =head1 METHODS
 
@@ -26,6 +26,8 @@ Call C<new()> to create a new IO::Socket::SIPC object.
     favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL or something else.
     deflate         Pass your own sub reference for serializion.
     inflate         Pass your own sub reference for deserializion.
+    timeout         Set up a timeout one time on accept(). This option is only useful if your favorite
+                    socket creator provides a timeout() method. Otherwise is occurs an error.
     use_check_sum   Check each transport with a MD5 sum.
     gen_check_sum   Set up your own checksum generator.
 
@@ -36,6 +38,7 @@ Defaults
     favorite        IO::Socket::INET
     deflate         nfreeze() of Storable
     inflate         thaw() of Storable (in a Safe compartment)
+    timeout         not used until you set it
     gen_check_sum   md5() of Digest::MD5
     use_check_sum   enabled (disable it with 0)
 
@@ -43,10 +46,12 @@ You can set your favorite socket handler. Example:
 
     use IO::Socket::SIPC;
 
-    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
+    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
 
-The only mandatory thing is that your favorite must provide an C<accept()> method to wait
-for connections because C<accept()> of IP::Socket::SIPC used it.
+NOTE that the only mandatory thing is that your favorite must provide an C<accept()> method to wait
+for connections because the C<accept()> method of IP::Socket::SIPC used it. If your favorite doesn't
+provide an C<accept()> method it or it's another name then please request this feature by send me
+a email. I will try to wrap it or disable checking the existence of C<accept()>!
 
 Also you can set your own serializer if you like. Example:
 
@@ -58,7 +63,7 @@ Also you can set your own serializer if you like. Example:
         inflate => sub { Convert::Bencode_XS::bdecode($_[0]) },
     );
 
-    # or
+    # or maybe
 
     use IO::Socket::SIPC;
     use JSON::PC;
@@ -69,23 +74,25 @@ Also you can set your own serializer if you like. Example:
     );
 
 NOTE that the code that you handoff with deflate and inflate is embed in an eval block and if
-it produce an error you can get the error string by calling C<errstr()>. If you use the default
-deserializer of Storable the data is deserialized in a Safe compartment. If you use another
+it an error occurs you can get the error string by calling C<errstr()>. If you use the default
+deserializer of Storable then the data is deserialized in a Safe compartment. If you use another
 deserializer you have to build your own Safe compartment within your code ref!
 
-You can set your own checksum generator if you like (dummy example):
+It's just as well possible to use your own checksum generator if you like (dummy example):
 
     my $sipc = IO::Socket::SIPC->new(
        gen_check_sum => sub { Your::Fav::gen_sum($_[0]) }
     );
 
-=head2 read_max_bytes(), send_max_bytes()
+But I think Digest::MD5 is very well and it does it's job.
+
+=head2 read_max_bytes() and send_max_bytes()
 
 Call both methods to increase or decrease the maximum bytes that the server or client
 is allowed to C<read()> or C<send()>. Possible sizes are KB, MB and GB or just a number
 for bytes. It's not case sensitiv and you can use C<KB> or C<kb> or just C<k>. If you want
-set the readable size to unlimited then you can call both methods with 0 or C<unlimited>.
-The default max send and read size is unlimited.
+set the readable or sendable size to unlimited then you can call both methods with 0 or
+C<unlimited>. The default max send and read size is unlimited.
 
 Here some notations examples
 
@@ -96,6 +103,9 @@ Here some notations examples
     # unlimited
     $sipc->read_max_bytes('unlimited');
     $sipc->read_max_bytes(0);
+
+NOTE that the readable and sendable size is computed by the serialized and deserialized data
+or on the raw data if you use C<read_raw()> or C<send_raw()>.
 
 =head2 connect()
 
@@ -118,19 +128,20 @@ socket creator and handoff all params to it. Example:
 
 If a Listen socket is defined then you can wait for connections with C<accept()>.
 C<accept()> is just a wrapper to the original C<accept()> method of your favorite
-socket handler.
+socket creator.
 
-If a connection is accepted a new object is created related to the peer. The new object will
+If a connection is accepted then a new object is created related to the peer. The new object will
 be returned.
 
-In addition you can set a timeout if your favorite module provides a C<timeout()> method.
+In addition you can set a timeout value in seconds if your favorite module provides a C<timeout()>
+method.
 
-    $sipc->accept(10)
+    while ( my $c = $sipc->accept(10) ) { ... }
 
 =head2 disconnect()
 
-Call C<disconnect()> to disconnect the current connection. C<disconnect()> calls
-C<close()> on the socket that is referenced by the object.
+Call C<disconnect()> to disconnect the current connection. C<disconnect()> calls C<close()> on
+the socket that is referenced by the object.
 
 =head2 sock()
 
@@ -147,45 +158,43 @@ IO::Socket::INET examples:
     my $sock = $sipc->sock;
     $sock->peerhost;
 
-Note that if you use
+NOTE that if you use
 
-    while (my $c = $sipc->sock->accept) { }
+    while ( my $c = $sipc->sock->accept ) { ... }
 
 that $c is the unwrapped IO::Socket::INET object and not a IO::Socket::SIPC object.
 
 =head2 send()
 
 Call C<send()> to send data over the socket to the peer. The data will be serialized
-and packed before it sends to the peer. If you use the default serializer that you
-must handoff an reference, otherwise an error occured because C<nfreeze()> of Storable
-just works with references. If you want to send a raw string and disable serialization
-you can set a 1 as second param.
+and packed before it sends to the peer. If you use the default serializer then you
+must handoff a reference, otherwise an error occure because C<nfreeze()> of Storable
+just works with references.
 
-    $sipc->send("No serialization", 1);
-    $sipc->send(\"With serialization");
+    $sipc->send("Hello World!");  # this would fail
+    $sipc->send(\"Hello World!"); # this not
 
-If you use your own serializer then consult the documentation if the serializer needs
-a reference or if a scalar works as well.
+If you use your own serializer then consult the documentation for what the serializer expect.
 
 C<send()> returns undef on errors or if send_max_bytes is overtaken.
 
 =head2 read()
 
 Call C<read()> to read data from the socket. The data will be unpacked and deserialized
-before it is returned. To disable deserialization and read a string from the socket just
-set a 1 as param.
+before it is returned. If the maximum read bytes is overtaken or an error occured then
+C<read()> returns undef and aborts to read from the socket.
 
-    my $string = $sipc->read(1); # disable deserialization
+=head2 read_raw() and send_raw()
 
-If the maximum allowed bytes is overtaken or an error occured then C<read()> returns undef and
-aborts reading from the socket.
+If you want to read or send a raw string and disable the serializer for a single transport then
+you can call C<read_raw()> or C<send_raw()>.
 
 =head2 errstr()
 
 Call C<errstr()> to get the current error message if a method returns undef. C<errstr()> is not
 useable with C<new()> because new fails by wrong settings.
 
-Note that C<errstr()> do not contain the error message of your favorite module, because it's to
+NOTE that C<errstr()> do not contain the error message of your favorite module, because it's to
 confused to find the right place for the error message. As example the error message from IO::Socket::INET
 is provided in C<$@> and from IO::Socket::SSL in C<IO::Socket::SSL->errstr()>. Maybe the error message
 of your favorite is placed somewhere else. C<errstr()> contains only a short message of what happends
@@ -213,33 +222,29 @@ Take a look to the examples directory.
     use warnings;
     use IO::Socket::SIPC;
 
-    my $sipc = IO::Socket::SIPC->new();
+    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
 
     $sipc->connect(
-       LocalAddr       => 'localhost',
-       LocalPort       => 50010,
-       Proto           => 'tcp',
-       Listen          => 10, 
-       Reuse           => 1,
-       SSL_verify_mode => 0x01,
-       SSL_ca_file     => '../certs/ca.pem',
-       SSL_cert_file   => '../certs/servercert.pem',
-       SSL_key_file    => '../certs/serverkey.pem',
-       SSL_passwd_cb   => sub {return "megaraptor"},
-    ) or die $sipc->errstr($sipc->sock->errstr);
+       LocalAddr  => 'localhost',
+       LocalPort  => 50010,
+       Proto      => 'tcp',
+       Listen     => 10, 
+       Reuse      => 1,
+    ) or die $sipc->errstr($@);
 
     warn "server initialized\n";
 
     $sipc->sock->timeout(10);
 
     while ( 1 ) { 
-       while (my $client = $sipc->accept()) { 
+       while ( my $client = $sipc->accept() ) {
           print "connect from client: ", $client->sock->peerhost, "\n";
-          my $request = $client->read or die $client->errstr($client->sock->errstr);
-          next unless $$request;
-          chomp($$request);
-          warn "client says: $$request\n";
-          $client->send({ foo => 'is foo', bar => 'is bar', baz => 'is baz'}) or die $client->errstr($client->sock->errstr);
+          my $request = $client->read(1) or die $client->errstr($!);
+          next unless $request;
+          chomp($request);
+          warn "client says: $request\n";
+          $client->send({ foo => 'is foo', bar => 'is bar', baz => 'is baz'})
+             or die $client->errstr($!);
           $client->disconnect or die $client->errstr($!);
        }   
        warn "server runs on a timeout, re-listen on socket\n";
@@ -254,24 +259,18 @@ Take a look to the examples directory.
     use Data::Dumper;
     use IO::Socket::SIPC;
 
-    my $sipc = IO::Socket::SIPC->new();
+    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
 
     $sipc->connect(
-       PeerAddr        => 'localhost',
-       PeerPort        => 50010,
-       Proto           => 'tcp',
-       SSL_use_cert    => 1,
-       SSL_verify_mode => 0x01,
-       SSL_ca_file     => '../certs/ca.pem',
-       SSL_cert_file   => '../certs/clientcert.pem',
-       SSL_key_file    => '../certs/clientkey.pem',
-       SSL_passwd_cb   => sub { return "pyroraptor" }
-    ) or die $sipc->errstr($sipc->sock->errstr);
+       PeerAddr => 'localhost',
+       PeerPort => 50010,
+       Proto    => 'tcp',
+    ) or die $sipc->errstr($@);
 
     warn "client connected to server\n";
 
-    $sipc->send("Hello server, gimme some data :-)\n") or die $sipc->errstr($sipc->sock->errstr);
-    my $answer = $sipc->read or die $sipc->errstr($sipc->sock->errstr);
+    $sipc->send("Hello server, gimme some data :-)\n", 1) or die $sipc->errstr($!);
+    my $answer = $sipc->read or die $sipc->errstr($!);
     warn "server data: \n";
     warn Dumper($answer);
     $sipc->disconnect or die $sipc->errstr($!);
@@ -280,6 +279,7 @@ Take a look to the examples directory.
 
     UNIVERSAL           -  to check for routines with can()
     UNIVERSAL::require  -  to post load favorite modules
+    IO::Socket::INET    -  to create sockets
     Digest::MD5         -  to check the data before and after transports
     Storable            -  the default serializer and deserializer
     Safe                -  deserialize (Storable::thaw) in a safe compartment
@@ -304,10 +304,12 @@ MAIL: <jschulz.cpan(at)bloonix.de>
 
 IRC: irc.perl.org#perlde
 
-=head1 TODO
+=head1 TODO AND IDEAS
 
     * do you have any ideas?
-    * maybe another implementation of sum checks
+    * maybe another implementations of check sum generators
+    * do you need another wrapper as accept() or timeout()? Tell me!
+    * auto authentification
 
 =head1 COPYRIGHT
 
@@ -319,7 +321,7 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.01_04';
+our $VERSION = '0.02';
 
 use strict;
 use warnings;
@@ -328,9 +330,9 @@ use UNIVERSAL::require;
 use Carp qw/croak/;
 
 # the default send + read bytes is unlimited
-use constant DEFAULT_IO_SOCKET  => 'IO::Socket::INET';
-use constant DEFAULT_MAX_BYTES  => 0;
-use constant USE_CHECK_SUM      => 1;
+use constant DEFAULT_IO_SOCKET => 'IO::Socket::INET';
+use constant DEFAULT_MAX_BYTES => 0;
+use constant USE_CHECK_SUM     => 1;
 
 # globals
 $IO::Socket::SIPC::ERRSTR = defined;
@@ -361,6 +363,15 @@ sub new {
 
    return $self;
 }
+
+# -------------------------------------------------------------------------
+# Yet unsupported and just an idea. This should makes it possible to create
+# own wrapper over favorites socket creators... I hope I never need it :-)
+# sub wrapper {
+#    my ($self, $name, $code) = @_;
+#    { no strict 'refs'; *{$name} = $code; }
+# }
+# -------------------------------------------------------------------------
 
 sub read_max_bytes {
    my ($self, $bytes) = @_; 
@@ -404,16 +415,18 @@ sub disconnect {
    return 1;
 }
 
+sub send_raw { return $_[0]->send($_[1], 1) }
+
+sub read_raw { return $_[0]->read(1) }
+
 sub send {
-   my ($self, $data, $no_deflate) = @_;
+   my ($self, $data, $no_deflate) = (shift, shift, shift);
    my $maxbyt = $self->{send_max_bytes};
    my $sock   = $self->{sock};
 
    # --------------------------------------------------------
-   # at first we serializing data and reuse $data all time to
-   # because we don't like to blow away memory and if $data
-   # isn't a reference we force it because Storable::nfreeze  
-   # just works with references
+   # at first we serializing data and reuse $data all time
+   # because we don't like to blow away memory
    # --------------------------------------------------------
 
    unless ($no_deflate) {

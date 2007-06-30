@@ -1,3 +1,6 @@
+0.02    Released at 2007-06-30.
+        Did some code improvements and fixed pod typos.
+        Added read_raw() and send_raw() as replacement for read(1) and send(1).
 0.01_04 Released at 2007-06-29.
         Added new param to read() and send(). Now it's possible to
           give an 1 as param, it disables serializion for this one time.

@@ -29,7 +29,7 @@ my $port = ();
       my $client = $socket->accept or die $socket->errstr;
       ok(1, "accept connect");
 
-      my $string = $client->read(1) or die $client->errstr;
+      my $string = $client->read_raw or die $client->errstr;
 
       if ($string eq 'foo-bar-baz') {
          ok(1, "read string");
@@ -81,7 +81,7 @@ sleep 1;
    my $string  = ('foo-bar-baz');
    my %struct  = (foo => 'foo', bar => 'bar', baz => 'baz');
    my $to_much = 'x' x 101;
-   $socket->send($string, 1) or die $socket->errstr;
+   $socket->send_raw($string) or die $socket->errstr;
    $socket->send(\%struct) or die $socket->errstr;
    $socket->send(\$to_much) or die $socket->errstr;
    $socket->disconnect or die $socket->errstr;

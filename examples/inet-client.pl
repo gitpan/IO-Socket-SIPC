@@ -14,7 +14,7 @@ $sipc->connect(
 
 warn "client connected to server\n";
 
-$sipc->send("Hello server, gimme some data :-)\n", 1) or die $sipc->errstr($!);
+$sipc->send_raw("Hello server, gimme some data :-)\n") or die $sipc->errstr($!);
 my $answer = $sipc->read or die $sipc->errstr($!);
 warn "server data: \n";
 warn Dumper($answer);

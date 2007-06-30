@@ -25,7 +25,7 @@ $sipc->sock->timeout(10);
 while ( 1 ) {
    while (my $client = $sipc->accept()) {
       print "connect from client: ", $client->sock->peerhost, "\n";
-      my $request = $client->read(1) or die $client->errstr($client->sock->errstr);
+      my $request = $client->read_raw or die $client->errstr($client->sock->errstr);
       next unless $request;
       chomp($request);
       warn "client says: $request\n";
