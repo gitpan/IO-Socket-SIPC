@@ -1,3 +1,8 @@
+0.03    Released at 2007-07-03.
+        Added debugging availability.
+        Fixed read() and send() because both breaks if the favorite
+          is IO::Socket::SSL and the data length > 16384 bytes.
+        Did some other code improvements.
 0.02    Released at 2007-06-30.
         Did some code improvements and fixed pod typos.
         Added read_raw() and send_raw() as replacement for read(1) and send(1).

@@ -194,26 +194,25 @@ METHODS
     undef. "errstr()" is not useable with "new()" because new fails by wrong
     settings.
 
-    NOTE that "errstr()" do not contain the error message of your favorite
-    module, because it's to confused to find the right place for the error
-    message. As example the error message from IO::Socket::INET is provided
-    in $@ and from IO::Socket::SSL in "IO::Socket::SSL-"errstr()>. Maybe the
-    error message of your favorite is placed somewhere else. "errstr()"
-    contains only a short message of what happends in IO::Socket::SIPC. If
-    you want to know the right message of your favorite try something
-    like...
+    NOTE that "errstr()" returns the error message and the message from $!
+    if necessary. If your favorite module placed it error message somewhere
+    else you have to fetch it yourself, but it's possible to append the
+    error message to "errstr()" if you like.
 
-        # IO::Socket::INET
+        # IO::Socket::INET writes connection errors to $@
         $sipc->connect(%options) or die $sipc->errstr($@);
 
-        # IO::Socket::SSL
+        # special IO::Socket::SSL errors are available with &IO::Socket::SSL::errstr
         $sipc->connect(%options) or die $sipc->errstr($sipc->sock->errstr);
 
-        # Your::Favorite
-        $sipc->connect(%options) or die $sipc->errstr($YourFavoriteERRSTR);
+  debug()
+    You can turn on a little debugger if you like
 
-        # or just
-        $sipc->connect(%options) or die $sipc->errstr($!);
+        $sipc->debug(1);
+        # or
+        $DEBUG = 1;
+
+    It prints informations to STDERR.
 
 EXAMPLES
     Take a look to the examples directory.

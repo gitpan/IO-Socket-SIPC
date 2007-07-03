@@ -194,23 +194,25 @@ you can call C<read_raw()> or C<send_raw()>.
 Call C<errstr()> to get the current error message if a method returns undef. C<errstr()> is not
 useable with C<new()> because new fails by wrong settings.
 
-NOTE that C<errstr()> do not contain the error message of your favorite module, because it's to
-confused to find the right place for the error message. As example the error message from IO::Socket::INET
-is provided in C<$@> and from IO::Socket::SSL in C<IO::Socket::SSL->errstr()>. Maybe the error message
-of your favorite is placed somewhere else. C<errstr()> contains only a short message of what happends
-in IO::Socket::SIPC. If you want to know the right message of your favorite try something like...
+NOTE that C<errstr()> returns the error message and the message from C<$!> if necessary. If your favorite
+module placed it error message somewhere else you have to fetch it yourself, but it's possible to append
+the error message to C<errstr()> if you like.
 
-    # IO::Socket::INET
+    # IO::Socket::INET writes connection errors to $@
     $sipc->connect(%options) or die $sipc->errstr($@);
 
-    # IO::Socket::SSL
+    # special IO::Socket::SSL errors are available with &IO::Socket::SSL::errstr
     $sipc->connect(%options) or die $sipc->errstr($sipc->sock->errstr);
 
-    # Your::Favorite
-    $sipc->connect(%options) or die $sipc->errstr($YourFavoriteERRSTR);
+=head2 debug()
 
-    # or just
-    $sipc->connect(%options) or die $sipc->errstr($!);
+You can turn on a little debugger if you like
+
+    $sipc->debug(1);
+    # or
+    $DEBUG = 1;
+
+It prints informations to STDERR.
 
 =head1 EXAMPLES
 
@@ -321,7 +323,7 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use strict;
 use warnings;
@@ -335,8 +337,10 @@ use constant DEFAULT_MAX_BYTES => 0;
 use constant USE_CHECK_SUM     => 1;
 
 # globals
-$IO::Socket::SIPC::ERRSTR = defined;
-$IO::Socket::SIPC::MAXBUF = 16384;
+use vars qw/$ERRSTR $MAXBUF $DEBUG/;
+$ERRSTR = defined;
+$MAXBUF = 16384;
+$DEBUG  = 0;
 
 sub new {
    my $class = shift;
@@ -364,18 +368,10 @@ sub new {
    return $self;
 }
 
-# -------------------------------------------------------------------------
-# Yet unsupported and just an idea. This should makes it possible to create
-# own wrapper over favorites socket creators... I hope I never need it :-)
-# sub wrapper {
-#    my ($self, $name, $code) = @_;
-#    { no strict 'refs'; *{$name} = $code; }
-# }
-# -------------------------------------------------------------------------
-
 sub read_max_bytes {
    my ($self, $bytes) = @_; 
    my $class = ref($self);
+   warn "set read_max_bytes to $bytes" if defined $bytes && $DEBUG;
    $self->{read_max_bytes} = $class->_bytes_calculator($bytes);
    return 1;
 }
@@ -383,6 +379,7 @@ sub read_max_bytes {
 sub send_max_bytes {
    my ($self, $bytes) = @_; 
    my $class = ref($self);
+   warn "set send_max_bytes to $bytes" if defined $bytes && $DEBUG;
    $self->{send_max_bytes} = $class->_bytes_calculator($bytes);
    return 1;
 }
@@ -390,9 +387,13 @@ sub send_max_bytes {
 sub connect {
    my $self = shift;
    my $favorite = $self->{favorite};
+   warn "create a new $self->{favorite} object" if $DEBUG;
    $self->{sock} = $favorite->new(@_)
-      or return $self->_raise_error("unable to create socket");
-   $self->{sock}->timeout($self->{timeout}) if $self->{timeout};
+      or return $self->_raise_error("unable to create socket: $!");
+   if ($self->{timeout}) {
+      warn "set timeout to $self->{timeout}" if $DEBUG;
+      $self->{sock}->timeout($self->{timeout})
+   }
    return 1;
 }
 
@@ -402,27 +403,41 @@ sub accept {
    croak "$class: invalid value for param timeout" if $timeout && $timeout !~ /^\d+\z/;
    my $sock = $self->{sock} or return undef;
    my %options = %{$self};
-   $sock->timeout($timeout) if defined $timeout;
+   if (defined $timeout) {
+      warn "set timeout to $timeout" if $DEBUG;
+      $sock->timeout($timeout);
+   }
    my $new = $class->_new(%{$self});
-   $new->{sock} = $sock->accept or return $self->_raise_error("accept fails");
+   warn "waiting for connection" if $DEBUG;
+   $new->{sock} = $sock->accept or return undef;
+   warn "incoming request" if $DEBUG;
    return $new;
 }
 
 sub disconnect {
    my $self = shift;
-   close($self->{sock}) or return $self->_raise_error("unable to close socket");
+   warn "disconnecting" if $DEBUG;
+   close($self->{sock}) or return $self->_raise_error("unable to close socket: $!");
    undef $self->{sock};
    return 1;
 }
 
-sub send_raw { return $_[0]->send($_[1], 1) }
+sub send_raw {
+   warn "send raw data" if $DEBUG;
+   return $_[0]->send($_[1], 1)
+}
 
-sub read_raw { return $_[0]->read(1) }
+sub read_raw {
+   warn "read raw data" if $DEBUG;
+   return $_[0]->read(1)
+}
 
 sub send {
-   my ($self, $data, $no_deflate) = (shift, shift, shift);
+   my ($self, $data, $no_deflate) = @_;
    my $maxbyt = $self->{send_max_bytes};
    my $sock   = $self->{sock};
+
+   warn "send data" if !$no_deflate && $DEBUG;
 
    # --------------------------------------------------------
    # at first we serializing data and reuse $data all time
@@ -435,7 +450,7 @@ sub send {
    }
 
    # -------------------------------------------------------
-   # the length is first use to check if the serialized data
+   # the length is used to check if the serialized data
    # exceeds send_max_bytes, because read_max_bytes checks
    # the serialized length as well
    # -------------------------------------------------------
@@ -461,24 +476,25 @@ sub send {
    # ----------------------------------------------------------
 
    $data = pack("N/a*", $data);
-   $self->_send(\$data) or return undef;
-
-   return 1;
+   return $self->_send(\$data);
 }
 
 sub read {
    my ($self, $no_inflate) = @_;
-   my $sock    = $self->{sock};
    my $maxbyt  = $self->{read_max_bytes};
+   my $sock    = $self->{sock};
    my $recvsum = ();
+
+   warn "read data" if !$no_inflate && $DEBUG;
 
    # -------------------------------------------------------------
    # At first we read the checksum if option use_check_sum is true
    # -------------------------------------------------------------
 
    if ($self->{use_check_sum}) {
+      warn "read checksum" if $DEBUG;
       my $packet = $self->_read(2) or return undef;
-      my $sumlen = unpack("n", $packet);
+      my $sumlen = unpack("n", $$packet);
       $recvsum   = $self->_read($sumlen) or return undef;
    }
 
@@ -488,7 +504,7 @@ sub read {
    # -----------------------------------------------------------
 
    my $buffer = $self->_read(4) or return undef;
-   my $length = unpack("N", $buffer)
+   my $length = unpack("N", $$buffer)
       or return $self->_raise_error("no data in buffer");
 
    # ----------------------------------------------
@@ -502,56 +518,41 @@ sub read {
    # now read the rest from the socket
    # ---------------------------------
 
-   my $rdsz  = $length < $IO::Socket::SIPC::MAXBUF ? $length : $IO::Socket::SIPC::MAXBUF;
-   my $rest  = $length; # to calculate the rest
-   my $bytes = 0;       # total bytes
-   $buffer   = '';      # reuse $buffer
-
-   # ----------------------------------
-   # we need to read the data in a loop
-   # to avoid an buffer overflow
-   # ----------------------------------
-
-   while (my $byt = CORE::read($sock, my $buf, $rdsz)) {
-      return $self->_raise_error("read only $byt/$rdsz bytes from buffer") unless $byt == $rdsz;
-      $bytes  += $byt;     # to compare later how much we read and what we expect to read
-      $buffer .= $buf;     # concat the data pieces
-      $rest   -= $byt;     # this is the rest we have to read
-      $rdsz    = $rest     # otherwise CORE::read() hangs if we wants to read to much
-         if $rest < $IO::Socket::SIPC::MAXBUF;
-      last unless $rest;   # jump out if we read all data
-   }
-
-   return $self->_raise_error("read only $bytes/$length bytes from socket")
-      unless $bytes == $length;
+   my $packet = $self->_read($length);
 
    # ---------------------------------------------
    # checking the md5sum if option use_check_sum is true
    # ----------------------------------------------
 
    if ($self->{use_check_sum}) {
-      my $gensum = $self->_gen_check_sum($buffer) or return undef;
+      my $checksum = $self->_gen_check_sum($$packet) or return undef;
+      warn "compare checksums" if $DEBUG;
       return $self->_raise_error("the checksums are not identical")
-         unless $recvsum eq $gensum; # careful... $recvsum is a scalar reference
+         unless $$recvsum eq $checksum;
    }
 
    # ------------------------------------------
    # deserializing data if $no_inflate is false
    # ------------------------------------------
 
-   return $no_inflate ? $buffer : $self->_inflate($buffer);
+   return $no_inflate ? $$packet : $self->_inflate($$packet);
 }
 
 sub sock {
    # return object || class
-   return $_[0]->{sock} || $_[0]->{favorite}
+   warn "access sock object" if $DEBUG;
+   return $_[0]->{sock} || $_[0]->{favorite};
 }
 
 sub errstr {
    my ($self, $msg) = @_;
    my $class = ref($self);
-   return "$class: " . $IO::Socket::SIPC::ERRSTR . " " . $msg if $msg;
-   return "$class: " . $IO::Socket::SIPC::ERRSTR;
+   return "$class: " . $ERRSTR . " " . $msg if $msg;
+   return "$class: " . $ERRSTR;
+}
+
+sub debug {
+   $DEBUG = $_[1];
 }
 
 # -------------
@@ -561,6 +562,7 @@ sub errstr {
 sub _new {
    my $class = shift;
    my $args  = ref($_[0]) eq 'HASH' ? $_[0] : { @_ };
+   warn "creating new IO::Socket::SIPC object" if $DEBUG;
    return bless $args, $class;
 }
 
@@ -568,40 +570,70 @@ sub _send {
    my ($self, $packet) = @_;
    my $sock = $self->{sock};
    my $length = length($$packet);
-   my $written = syswrite($sock, $$packet, $length);
-   return $self->_raise_error("send only $written/$length bytes over socket")
-       unless $written == $length;
+   my $rest   = $length;
+   my ($offset, $written) = (0, undef);
+
+   while ( $rest ) {
+      $written = syswrite $sock, $$packet, $rest, $offset;
+      return $self->_raise_error("system write error: $!")
+         unless defined $written;
+      $rest   -= $written;
+      $offset += $written;
+      warn "send $offset/$length bytes" if $DEBUG;
+   }
+
    return 1;
 }
 
 sub _read {
    my ($self, $length) = @_;
    my $sock = $self->{sock};
-   my $read = CORE::read($sock, my $packet, $length);
-   return $self->_raise_error("read only $read/$length bytes from socket")
-      unless $read == $length;
-   return $packet;
+   my $rest = $length;
+   my $rdsz = $length < $MAXBUF ? $length : $MAXBUF;
+   my ($packet, $rlen);
+
+   while ( my $len = sysread $sock, my $buf, $rdsz ) {
+      if (!defined $len) {
+         next if $! =~ /^Interrupted/;
+         return $self->_raise_error("system read error: $!\n");
+      }
+      $packet .= $buf;  # concat the data pieces
+      $rest   -= $len;  # this is the rest we have to read
+      $rlen   += $len;  # to compare later how much we read and what we expected to read
+      warn "read $rlen/$length bytes" if $DEBUG;
+      $rest   || last;  # jump out if we read all data
+      $rdsz    = $rest  # otherwise sysread() hangs if we wants to read to much
+         if $rest < $MAXBUF;
+   }
+
+   return $self->_raise_error("read only $rlen/$length bytes from socket")
+      if $rest;
+
+   return \$packet;
 }
 
 sub _deflate {
    my ($self, $data) = @_;
    my $deflated = ();
+   warn "deflate data" if $DEBUG;
    eval { $deflated = $self->{deflate}($data) };
-   return $@ ? $self->_raise_error("an deflate error occurs: ".$@) : $deflated;
+   return $@ ? $self->_raise_error("unable to deflate data: ".$@) : $deflated;
 }
 
 sub _inflate {
    my ($self, $data) = @_;
    my $inflated = ();
+   warn "inflate data" if $DEBUG;
    eval { $inflated = $self->{inflate}($data) };
-   return $@ ? $self->_raise_error("an inflate error occurs: ".$@) : $inflated;
+   return $@ ? $self->_raise_error("unable to inflate data: ".$@) : $inflated;
 }
 
 sub _gen_check_sum {
    my ($self, $data) = @_;
    my $checksum = ();
+   warn "generate checksum" if $DEBUG;
    eval { $checksum = $self->{gen_check_sum}($data) };
-   return $@ ? $self->_raise_error("an gen_check_sum error occurs: ".$@) : $checksum;
+   return $@ ? $self->_raise_error("unable to generate checksum: ".$@) : $checksum;
 }
 
 sub _load_serializer {
@@ -664,7 +696,8 @@ sub _load_digest {
 }
 
 sub _raise_error {
-   $IO::Socket::SIPC::ERRSTR = $_[1];
+   $ERRSTR = $_[1];
+   warn $ERRSTR if $DEBUG;
    return undef;
 }
 

@@ -13,8 +13,7 @@ $sipc->connect(
    Reuse      => 1,
 ) or die $sipc->errstr($@);
 
-warn "server initialized\n";
-
+$sip->debug(1);
 $sipc->sock->timeout(10);
 
 while ( 1 ) {
