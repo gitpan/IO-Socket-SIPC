@@ -11,7 +11,6 @@ my $build = Module::Build->new(
     dist_abstract      => undef,
     requires => {
         'Digest::MD5'        => 0,
-        'UNIVERSAL'          => 0,
         'UNIVERSAL::require' => 0,
         'IO::Socket::INET'   => 0,
         'Storable'           => 0,

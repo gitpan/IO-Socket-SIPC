@@ -16,12 +16,12 @@ $sipc->connect(
    SSL_cert_file   => '../certs/clientcert.pem',
    SSL_key_file    => '../certs/clientkey.pem',
    SSL_passwd_cb   => sub { return "pyroraptor" }
-) or die $sipc->errstr($sipc->sock->errstr);
+) or die $sipc->errstr;
 
 warn "client connected to server\n";
 
-$sipc->send_raw("Hello server, gimme some data :-)\n") or die $sipc->errstr($sipc->sock->errstr);
-my $answer = $sipc->read or die $sipc->errstr($sipc->sock->errstr);
+$sipc->send_raw("Hello server, gimme some data :-)\n") or die $sipc->errstr;
+my $answer = $sipc->read or die $sipc->errstr;
 warn "server data: \n";
 warn Dumper($answer);
-$sipc->disconnect or die $sipc->errstr($!);
+$sipc->disconnect or die $sipc->errstr;

@@ -8,14 +8,13 @@ WriteMakefile
           'EXE_FILES' => [],
           'VERSION_FROM' => 'lib/IO/Socket/SIPC.pm',
           'PREREQ_PM' => {
-                           'UNIVERSAL' => 0,
-                           'IO::Socket::INET' => 0,
-                           'Storable' => 0,
-                           'Carp' => 0,
                            'Test::More' => 0,
+                           'IO::Socket::INET' => 0,
                            'Digest::MD5' => 0,
+                           'Storable' => 0,
+                           'UNIVERSAL::require' => 0,
                            'Safe' => 0,
-                           'UNIVERSAL::require' => 0
+                           'Carp' => 0
                          }
         )
 ;

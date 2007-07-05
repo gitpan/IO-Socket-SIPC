@@ -10,10 +10,10 @@ IO::Socket::SIPC - Serialize perl structures for inter process communication.
 
 This module makes it possible to transport perl structures between processes over sockets.
 It wrappes your favorite IO::Socket module and controls the amount of data over the socket.
-The default serializer is Storable with nfreeze() and thaw() but you can choose each other
-serializer you wish to use. You have just follow some restrictions and need only some lines
-of code to adjust it for yourself. In addition it's possible to use a checksum to check the
-integrity of the transported data. Take a look to the method section.
+The default serializer is Storable with C<nfreeze()> and C<thaw()> but you can choose each
+other serializer you wish to use. You have just follow some restrictions and need only some
+lines of code to adjust it for yourself. In addition it's possible to use a checksum to check
+the integrity of the transported data. Take a look to the method section.
 
 =head1 METHODS
 
@@ -21,39 +21,31 @@ integrity of the transported data. Take a look to the method section.
 
 Call C<new()> to create a new IO::Socket::SIPC object.
 
-    read_max_bytes  Set the maximum allowed bytes to read from the socket.
-    send_max_bytes  Set the maximum allowed bytes to send over the socket.
-    favorite        Set your favorite module, IO::Socket::INET or IO::Socket::SSL or something else.
+    favorite        Set your favorite module - IO::Socket::(INET|UNIX|SSL).
     deflate         Pass your own sub reference for serializion.
     inflate         Pass your own sub reference for deserializion.
-    timeout         Set up a timeout one time on accept(). This option is only useful if your favorite
-                    socket creator provides a timeout() method. Otherwise is occurs an error.
+    read_max_bytes  Set the maximum allowed bytes to read from the socket.
+    send_max_bytes  Set the maximum allowed bytes to send over the socket.
     use_check_sum   Check each transport with a MD5 sum.
     gen_check_sum   Set up your own checksum generator.
 
 Defaults
 
-    read_max_bytes  unlimited
-    send_max_bytes  unlimited
     favorite        IO::Socket::INET
     deflate         nfreeze() of Storable
     inflate         thaw() of Storable (in a Safe compartment)
-    timeout         not used until you set it
+    read_max_bytes  unlimited
+    send_max_bytes  unlimited
     gen_check_sum   md5() of Digest::MD5
     use_check_sum   enabled (disable it with 0)
 
-You can set your favorite socket handler. Example:
+Set your favorite socket handler:
 
     use IO::Socket::SIPC;
 
     my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
 
-NOTE that the only mandatory thing is that your favorite must provide an C<accept()> method to wait
-for connections because the C<accept()> method of IP::Socket::SIPC used it. If your favorite doesn't
-provide an C<accept()> method it or it's another name then please request this feature by send me
-a email. I will try to wrap it or disable checking the existence of C<accept()>!
-
-Also you can set your own serializer if you like. Example:
+Set your own serializer:
 
     use IO::Socket::SIPC;
     use Convert::Bencode_XS;
@@ -78,7 +70,7 @@ it an error occurs you can get the error string by calling C<errstr()>. If you u
 deserializer of Storable then the data is deserialized in a Safe compartment. If you use another
 deserializer you have to build your own Safe compartment within your code ref!
 
-It's just as well possible to use your own checksum generator if you like (dummy example):
+Use your own checksum generator (dummy example):
 
     my $sipc = IO::Socket::SIPC->new(
        gen_check_sum => sub { Your::Fav::gen_sum($_[0]) }
@@ -110,7 +102,7 @@ or on the raw data if you use C<read_raw()> or C<send_raw()>.
 =head2 connect()
 
 Call C<connect()> to connect to the socket. C<connect()> just call C<new()> of your favorite
-socket creator and handoff all params to it. Example:
+and handoff all params to it. Example:
 
     my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
 
@@ -126,17 +118,15 @@ socket creator and handoff all params to it. Example:
 
 =head2 accept()
 
-If a Listen socket is defined then you can wait for connections with C<accept()>.
-C<accept()> is just a wrapper to the original C<accept()> method of your favorite
-socket creator.
+If a Listen socket is defined then you can wait for connections with C<accept()>. C<accept()> is
+just a wrapper to the original C<accept()> method of your favorite. If a connection is accepted
+then a new object is created related to the peer. The new object will be returned on success,
+undef on error and 0 on a timeout.
 
-If a connection is accepted then a new object is created related to the peer. The new object will
-be returned.
+You can set a timeout value in seconds.
 
-In addition you can set a timeout value in seconds if your favorite module provides a C<timeout()>
-method.
-
-    while ( my $c = $sipc->accept(10) ) { ... }
+    my $c = $sipc->accept(10)
+    warn "accept: timeout" if defined $c;
 
 =head2 disconnect()
 
@@ -145,24 +135,24 @@ the socket that is referenced by the object.
 
 =head2 sock()
 
-Call C<sock()> to access the object of your favorite module.
+Call C<sock()> to access the raw object of your favorite module.
 
 IO::Socket::INET examples:
 
     $sipc->sock->timeout(10);
     # or
-    $sipc->sock->peerhost;
+    $peerhost = $sipc->sock->peerhost;
     # or
-    $sipc->sock->peerport;
+    $peerport = $sipc->sock->peerport;
     # or
-    my $sock = $sipc->sock;
-    $sock->peerhost;
+    $sock = $sipc->sock;
+    $peerhost = $sock->peerhost;
 
 NOTE that if you use
 
     while ( my $c = $sipc->sock->accept ) { ... }
 
-that $c is the unwrapped IO::Socket::INET object and not a IO::Socket::SIPC object.
+that $c is the unwrapped IO::Socket::* object and not a IO::Socket::SIPC object.
 
 =head2 send()
 
@@ -192,27 +182,18 @@ you can call C<read_raw()> or C<send_raw()>.
 =head2 errstr()
 
 Call C<errstr()> to get the current error message if a method returns undef. C<errstr()> is not
-useable with C<new()> because new fails by wrong settings.
+useable with C<new()> because C<new()> croaks by wrong settings.
 
-NOTE that C<errstr()> returns the error message and the message from C<$!> if necessary. If your favorite
-module placed it error message somewhere else you have to fetch it yourself, but it's possible to append
-the error message to C<errstr()> if you like.
-
-    # IO::Socket::INET writes connection errors to $@
-    $sipc->connect(%options) or die $sipc->errstr($@);
-
-    # special IO::Socket::SSL errors are available with &IO::Socket::SSL::errstr
-    $sipc->connect(%options) or die $sipc->errstr($sipc->sock->errstr);
+NOTE that C<errstr()> returns the current error message that contain C<$!> if necessary. If you use
+IO::Socket::SSL then the message from IO::Socket::SSL->errstr is appended as well.
 
 =head2 debug()
 
 You can turn on a little debugger if you like
 
     $sipc->debug(1);
-    # or
-    $DEBUG = 1;
 
-It prints informations to STDERR.
+The debugger will set IO::Socket::SSL::DEBUG as well if you use it.
 
 =head1 EXAMPLES
 
@@ -220,66 +201,12 @@ Take a look to the examples directory.
 
 =head2 Server example
 
-    use strict;
-    use warnings;
-    use IO::Socket::SIPC;
-
-    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
-
-    $sipc->connect(
-       LocalAddr  => 'localhost',
-       LocalPort  => 50010,
-       Proto      => 'tcp',
-       Listen     => 10, 
-       Reuse      => 1,
-    ) or die $sipc->errstr($@);
-
-    warn "server initialized\n";
-
-    $sipc->sock->timeout(10);
-
-    while ( 1 ) { 
-       while ( my $client = $sipc->accept() ) {
-          print "connect from client: ", $client->sock->peerhost, "\n";
-          my $request = $client->read(1) or die $client->errstr($!);
-          next unless $request;
-          chomp($request);
-          warn "client says: $request\n";
-          $client->send({ foo => 'is foo', bar => 'is bar', baz => 'is baz'})
-             or die $client->errstr($!);
-          $client->disconnect or die $client->errstr($!);
-       }   
-       warn "server runs on a timeout, re-listen on socket\n";
-    }
-
-    $sipc->disconnect or die $sipc->errstr($!);
 
 =head2 Client example
 
-    use strict;
-    use warnings;
-    use Data::Dumper;
-    use IO::Socket::SIPC;
-
-    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
-
-    $sipc->connect(
-       PeerAddr => 'localhost',
-       PeerPort => 50010,
-       Proto    => 'tcp',
-    ) or die $sipc->errstr($@);
-
-    warn "client connected to server\n";
-
-    $sipc->send("Hello server, gimme some data :-)\n", 1) or die $sipc->errstr($!);
-    my $answer = $sipc->read or die $sipc->errstr($!);
-    warn "server data: \n";
-    warn Dumper($answer);
-    $sipc->disconnect or die $sipc->errstr($!);
 
 =head1 PREREQUISITES
 
-    UNIVERSAL           -  to check for routines with can()
     UNIVERSAL::require  -  to post load favorite modules
     IO::Socket::INET    -  to create sockets
     Digest::MD5         -  to check the data before and after transports
@@ -310,7 +237,7 @@ IRC: irc.perl.org#perlde
 
     * do you have any ideas?
     * maybe another implementations of check sum generators
-    * do you need another wrapper as accept() or timeout()? Tell me!
+    * do you like to have another wrapper as accept()? Tell me!
     * auto authentification
 
 =head1 COPYRIGHT
@@ -323,11 +250,10 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 use strict;
 use warnings;
-use UNIVERSAL;
 use UNIVERSAL::require;
 use Carp qw/croak/;
 
@@ -340,7 +266,6 @@ use constant USE_CHECK_SUM     => 1;
 use vars qw/$ERRSTR $MAXBUF $DEBUG/;
 $ERRSTR = defined;
 $MAXBUF = 16384;
-$DEBUG  = 0;
 
 sub new {
    my $class = shift;
@@ -348,21 +273,21 @@ sub new {
 
    $self->read_max_bytes($self->{read_max_bytes});
    $self->send_max_bytes($self->{send_max_bytes});
-   $self->_load_digest($self->{use_check_sum}) unless $self->{gen_check_sum};
    $self->_load_favorite;
 
    if (!$self->{deflate} && !$self->{inflate}) {
       $self->_load_serializer;
    } elsif (ref($self->{deflate}) ne 'CODE' || ref($self->{inflate}) ne 'CODE') {
-      croak "$class: options deflate/inflate expects a code ref";
+      croak "$class: options deflate and inflate expects a code ref";
    }
 
-   if ($self->{gen_check_sum} && ref($self->{gen_check_sum}) ne 'CODE') {
-      croak "$class: option gen_check_sum expect a code ref";
-   }
-
-   if ($self->{timeout} && $self->{timeout} !~ /^\d+\z/) {
-      croak "$class: invalid value for param timeout";
+   if (defined $self->{use_check_sum}) {
+      croak "$class: invalid value for option use_check_sum" unless $self->{use_check_sum} =~ /^[10]\z/;
+      if ($self->{gen_check_sum} && ref($self->{gen_check_sum}) ne 'CODE') {
+         croak "$class: option gen_check_sum expect a code ref";
+      } else {
+         $self->_load_digest;
+      }
    }
 
    return $self;
@@ -389,35 +314,46 @@ sub connect {
    my $favorite = $self->{favorite};
    warn "create a new $self->{favorite} object" if $DEBUG;
    $self->{sock} = $favorite->new(@_)
-      or return $self->_raise_error("unable to create socket: $!");
-   if ($self->{timeout}) {
-      warn "set timeout to $self->{timeout}" if $DEBUG;
-      $self->{sock}->timeout($self->{timeout})
-   }
+      or return $self->_raise_sock_error("unable to create socket");
    return 1;
 }
 
 sub accept {
    my ($self, $timeout) = @_;
    my $class = ref($self);
-   croak "$class: invalid value for param timeout" if $timeout && $timeout !~ /^\d+\z/;
-   my $sock = $self->{sock} or return undef;
+   my $sock = $self->{sock} or return $self->_raise_error("there is no socket defined");
    my %options = %{$self};
+
    if (defined $timeout) {
-      warn "set timeout to $timeout" if $DEBUG;
+      croak "$class: timeout isn't numeric" unless $timeout =~ /^\d+\z/;
+      warn "set timeout to '$timeout'" if $DEBUG;
       $sock->timeout($timeout);
    }
-   my $new = $class->_new(%{$self});
+
    warn "waiting for connection" if $DEBUG;
-   $new->{sock} = $sock->accept or return undef;
+
+   my $new_sock = $sock->accept or do {
+      if ($@ =~ /timeout/i) {
+         warn $@ if $DEBUG;
+         $ERRSTR = $@; $@ = ''; return 0;
+      } else {
+         return $self->_raise_sock_error("error on accept()");
+      }
+   };
+
    warn "incoming request" if $DEBUG;
+
+   # create and return a new object
+   my $new = $class->_new(%{$self});
+   $new->{sock} = $new_sock;
    return $new;
 }
 
 sub disconnect {
    my $self = shift;
+   my $sock = $self->{sock} || return 1;
    warn "disconnecting" if $DEBUG;
-   close($self->{sock}) or return $self->_raise_error("unable to close socket: $!");
+   close($sock) or return $self->_raise_error("unable to close socket: $!");
    undef $self->{sock};
    return 1;
 }
@@ -544,15 +480,14 @@ sub sock {
    return $_[0]->{sock} || $_[0]->{favorite};
 }
 
-sub errstr {
-   my ($self, $msg) = @_;
-   my $class = ref($self);
-   return "$class: " . $ERRSTR . " " . $msg if $msg;
-   return "$class: " . $ERRSTR;
-}
+sub errstr { return $ERRSTR }
 
 sub debug {
-   $DEBUG = $_[1];
+   my $self;
+   ($self, $DEBUG) = @_;
+   if ($self->{favorite} eq 'IO::Socket::SSL') {
+      $IO::Socket::SSL::DEBUG = $DEBUG;
+   }
 }
 
 # -------------
@@ -595,7 +530,7 @@ sub _read {
    while ( my $len = sysread $sock, my $buf, $rdsz ) {
       if (!defined $len) {
          next if $! =~ /^Interrupted/;
-         return $self->_raise_error("system read error: $!\n");
+         return $self->_raise_error("system read error: $!");
       }
       $packet .= $buf;  # concat the data pieces
       $rest   -= $len;  # this is the rest we have to read
@@ -614,26 +549,23 @@ sub _read {
 
 sub _deflate {
    my ($self, $data) = @_;
-   my $deflated = ();
    warn "deflate data" if $DEBUG;
-   eval { $deflated = $self->{deflate}($data) };
-   return $@ ? $self->_raise_error("unable to deflate data: ".$@) : $deflated;
+   eval { $data = $self->{deflate}($data) };
+   return $@ ? $self->_raise_error("unable to deflate data: ".$@) : $data;
 }
 
 sub _inflate {
    my ($self, $data) = @_;
-   my $inflated = ();
    warn "inflate data" if $DEBUG;
-   eval { $inflated = $self->{inflate}($data) };
-   return $@ ? $self->_raise_error("unable to inflate data: ".$@) : $inflated;
+   eval { $data = $self->{inflate}($data) };
+   return $@ ? $self->_raise_error("unable to inflate data: ".$@) : $data;
 }
 
 sub _gen_check_sum {
    my ($self, $data) = @_;
-   my $checksum = ();
    warn "generate checksum" if $DEBUG;
-   eval { $checksum = $self->{gen_check_sum}($data) };
-   return $@ ? $self->_raise_error("unable to generate checksum: ".$@) : $checksum;
+   eval { $data = $self->{gen_check_sum}($data) };
+   return $@ ? $self->_raise_error("unable to generate checksum: ".$@) : $data;
 }
 
 sub _load_serializer {
@@ -659,10 +591,10 @@ sub _load_favorite {
    my $self = shift;
    $self->{favorite} ||= DEFAULT_IO_SOCKET;
    my $class = ref($self);
+   $self->{favorite} =~ /^IO::Socket::(?:INET|UNIX|SSL)\z/
+      or croak "$class: invalid favorite '$self->{favorite}'";
    $self->{favorite}->require
       or croak "$class: unable to require $self->{favorite}";
-   UNIVERSAL::can($self->{favorite}, "accept")
-      or croak "$class: your favorite $self->{favorite} don't provide an accept() method";
 }
 
 sub _bytes_calculator {
@@ -683,20 +615,29 @@ sub _bytes_calculator {
 }
 
 sub _load_digest {
-   my ($self, $check_sum) = @_;
-   my $class = ref($self);
-   $check_sum = USE_CHECK_SUM unless defined $check_sum;
-   croak "$class: invalid value for param use_check_sum"
-      unless $check_sum =~ /^[10]\z/;
-   if ($check_sum) {
-      'Digest::MD5'->require;
-      $self->{gen_check_sum} = \&Digest::MD5::md5;
-   }
+   my $self = shift;
+   'Digest::MD5'->require;
+   $self->{gen_check_sum} = \&Digest::MD5::md5;
    $self->{use_check_sum} = 1;
 }
 
 sub _raise_error {
    $ERRSTR = $_[1];
+   warn $ERRSTR if $DEBUG;
+   return undef;
+}
+
+sub _raise_sock_error {
+   my $self = $_[0];
+   $ERRSTR = $_[1];
+
+   $ERRSTR .= " - $!" if $!;
+
+   if ($self->{favorite} eq 'IO::Socket::SSL') {
+      my $sslerr = $self->{sock} ? $self->{sock}->errstr : IO::Socket::SSL->errstr;
+      $ERRSTR .= " - $sslerr" if $sslerr;
+   }
+
    warn $ERRSTR if $DEBUG;
    return undef;
 }

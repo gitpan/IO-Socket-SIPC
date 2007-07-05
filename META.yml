@@ -1,6 +1,6 @@
 ---
 name: IO-Socket-SIPC
-version: 0.03
+version: 0.04
 author:
   - Jonny Schulz
 abstract: Serialize perl structures for inter process communication.
@@ -14,12 +14,11 @@ requires:
   Safe: 0
   Storable: 0
   Test::More: 0
-  UNIVERSAL: 0
   UNIVERSAL::require: 0
 provides:
   IO::Socket::SIPC:
     file: lib/IO/Socket/SIPC.pm
-    version: 0.03
+    version: 0.04
 generated_by: Module::Build version 0.2808
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.2.html

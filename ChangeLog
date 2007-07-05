@@ -1,3 +1,8 @@
+0.04    Released at 2007-07-05.
+        Added more error handling. Now I try to return the correct error string
+          because IO::Socket::SSL got advanced ssl errors.
+        Fixed examples and kicked $!, $@ and $socket->sock->errstr().
+        Did a lot of code improvements and pod changes.
 0.03    Released at 2007-07-03.
         Added debugging availability.
         Fixed read() and send() because both breaks if the favorite

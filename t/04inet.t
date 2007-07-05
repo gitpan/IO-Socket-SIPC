@@ -16,7 +16,7 @@ my $port = ();
       Proto     => 'tcp',
       Listen    => 1,
       Reuse     => 1,
-   ) or do { ok(0, "connect"); die $socket->errstr($!); };
+   ) or do { ok(0, "connect"); die $socket->errstr; };
 
    ok(1, "create socket");
 
@@ -76,7 +76,7 @@ sleep 1;
       PeerAddr        => $addr,
       PeerPort        => $port,
       Proto           => 'tcp',
-   ) or die $socket->errstr($!);
+   ) or die $socket->errstr;
 
    my $string  = ('foo-bar-baz');
    my %struct  = (foo => 'foo', bar => 'bar', baz => 'baz');
