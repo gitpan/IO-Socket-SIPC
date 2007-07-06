@@ -3,7 +3,10 @@ use strict;
 use warnings;
 use IO::Socket::SIPC;
 
-my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
+my $sipc = IO::Socket::SIPC->new(
+   favorite      => 'IO::Socket::SSL',
+   use_check_sum => 1,
+);
 
 $sipc->connect(
    LocalAddr       => 'localhost',
@@ -18,7 +21,7 @@ $sipc->connect(
    SSL_passwd_cb   => sub {return "megaraptor"},
 ) or die $sipc->errstr;
 
-$sipc->debug(1);
+$sipc->debug(4);
 
 while ( 1 ) { 
    my $client;

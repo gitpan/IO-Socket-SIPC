@@ -4,7 +4,10 @@ use warnings;
 use Data::Dumper;
 use IO::Socket::SIPC;
 
-my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
+my $sipc = IO::Socket::SIPC->new(
+   favorite      => 'IO::Socket::SSL',
+   use_check_sum => 1,
+);
 
 $sipc->connect(
    PeerAddr        => 'localhost',
@@ -20,6 +23,7 @@ $sipc->connect(
 
 warn "client connected to server\n";
 
+$sipc->debug(4);
 $sipc->send_raw("Hello server, gimme some data :-)\n") or die $sipc->errstr;
 my $answer = $sipc->read or die $sipc->errstr;
 warn "server data: \n";

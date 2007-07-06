@@ -5,19 +5,45 @@ NAME
 SYNOPSIS
         use IO::Socket::SIPC;
 
+        my $sipc = IO::Socket::SIPC->new(
+           favorite       => 'IO::Socket::INET',
+           use_check_sum  => 1,
+           read_may_bytes => '512k',
+           send_may_bytes => '512k'
+        );
+
+        $sipc->connect(
+           LocalAddr       => $address,
+           LocalPort       => $port,
+           Proto           => $proto,
+           Listen          => $listen,
+           ReuseAddr       => $reuse,
+        ) or die $sipc->errstr;
+
+        my $client = $sipc->accept($timeout);
+
+        my %perl_struct = (
+           hash  => { foo => 'bar' },
+           array => [ 'foo', 'bar' ],
+        );
+
+        $client->send( \%perl_struct );
+
 DESCRIPTION
     This module makes it possible to transport perl structures between
-    processes over sockets. It wrappes your favorite IO::Socket module and
-    controls the amount of data over the socket. The default serializer is
-    Storable with "nfreeze()" and "thaw()" but you can choose each other
-    serializer you wish to use. You have just follow some restrictions and
-    need only some lines of code to adjust it for yourself. In addition it's
-    possible to use a checksum to check the integrity of the transported
-    data. Take a look to the method section.
+    processes. It wrappes your favorite IO::Socket module and controls the
+    amount of data and verifies it with a checksum.
+
+    The default serializer is Storable with "nfreeze()" and "thaw()" and the
+    default checksum generator is Digest::MD5 with "md5()" but you can
+    choose any other serializer or checksum generator you wish to use, there
+    are just some restrictions that you have to comply with and you only
+    need to adjust a few lines of code by yourself.
 
 METHODS
-  new()
-    Call "new()" to create a new IO::Socket::SIPC object.
+  new(\%config)
+    The "new()" constructor method creates a new IO::Socket::SIPC object. A
+    list of parameters as a hash or a hash reference may be passed to it.
 
         favorite        Set your favorite module - IO::Socket::(INET|UNIX|SSL).
         deflate         Pass your own sub reference for serializion.
@@ -27,78 +53,91 @@ METHODS
         use_check_sum   Check each transport with a MD5 sum.
         gen_check_sum   Set up your own checksum generator.
 
-    Defaults
+    The defaults are:
 
         favorite        IO::Socket::INET
         deflate         nfreeze() of Storable
         inflate         thaw() of Storable (in a Safe compartment)
         read_max_bytes  unlimited
         send_max_bytes  unlimited
-        gen_check_sum   md5() of Digest::MD5
-        use_check_sum   enabled (disable it with 0)
+        use_check_sum   disabled (enable it with 1)
+        gen_check_sum   md5() of Digest::MD5 if use_check_sum is enabled
 
-    Set your favorite socket handler:
+    favorite
+        Set your favorite socket handler - IO::Socket::INET,
+        IO::Socket::UNIX or IO::Socket::SSL.
 
-        use IO::Socket::SIPC;
+            use IO::Socket::SIPC;
 
-        my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
+            my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
+    
+    deflate, inflate
+        Set your own serializer:
 
-    Set your own serializer:
+            use IO::Socket::SIPC;
+            use Convert::Bencode_XS;
 
-        use IO::Socket::SIPC;
-        use Convert::Bencode_XS;
+            my $sipc = IO::Socket::SIPC->new(
+                deflate => sub { Convert::Bencode_XS::bencode($_[0]) },
+                inflate => sub { Convert::Bencode_XS::bdecode($_[0]) },
+            );
 
-        my $sipc = IO::Socket::SIPC->new(
-            deflate => sub { Convert::Bencode_XS::bencode($_[0]) },
-            inflate => sub { Convert::Bencode_XS::bdecode($_[0]) },
-        );
+            # or maybe
 
-        # or maybe
+            use IO::Socket::SIPC;
+            use JSON::PC;
 
-        use IO::Socket::SIPC;
-        use JSON::PC;
+            my $sipc = IO::Socket::SIPC->new(
+                deflate => sub { JSON::PC::convert($_[0]) },
+                inflate => sub { JSON::PC::parse($_[0])   },
+            );
 
-        my $sipc = IO::Socket::SIPC->new(
-            deflate => sub { JSON::PC::convert($_[0]) },
-            inflate => sub { JSON::PC::parse($_[0])   },
-        );
+        NOTE that the code that you handoff to deflate and inflate is
+        embedded in an eval block for executions and if an error occurs you
+        can get the error string by calling "errstr()". If you use the
+        default deserializer of Storable then the data is deserialized in a
+        Safe compartment. If you use another deserializer you have to build
+        your own Safe compartment within your code ref!
 
-    NOTE that the code that you handoff with deflate and inflate is embed in
-    an eval block and if it an error occurs you can get the error string by
-    calling "errstr()". If you use the default deserializer of Storable then
-    the data is deserialized in a Safe compartment. If you use another
-    deserializer you have to build your own Safe compartment within your
-    code ref!
+    use_check_sum
+        Turn it on (1) or off (0) for the current object.
 
-    Use your own checksum generator (dummy example):
+        If you turn it on then a checksum is generated for any packet that
+        is transportet.
 
-        my $sipc = IO::Socket::SIPC->new(
-           gen_check_sum => sub { Your::Fav::gen_sum($_[0]) }
-        );
+        The default checksum generator is "md5()" of Digest::MD5.
 
-    But I think Digest::MD5 is very well and it does it's job.
+    gen_check_sum
+        Use your own checksum generator:
 
-  read_max_bytes() and send_max_bytes()
-    Call both methods to increase or decrease the maximum bytes that the
-    server or client is allowed to "read()" or "send()". Possible sizes are
-    KB, MB and GB or just a number for bytes. It's not case sensitiv and you
-    can use "KB" or "kb" or just "k". If you want set the readable or
-    sendable size to unlimited then you can call both methods with 0 or
-    "unlimited". The default max send and read size is unlimited.
+            use Digest::SHA2;
 
-    Here some notations examples
+            my $sha2obj = new Digest::SHA2;
 
-        $sipc->read_max_bytes(1048576);
-        $sipc->read_max_bytes('1024k');
-        $sipc->read_max_bytes('1MB');
+            my $sipc = IO::Socket::SIPC->new(
+                gen_check_sum => sub { $sha2obj->digest($_[0]) }
+            );
 
-        # unlimited
-        $sipc->read_max_bytes('unlimited');
-        $sipc->read_max_bytes(0);
+        But I think Digest::MD5 is very well and it does it's job.
 
-    NOTE that the readable and sendable size is computed by the serialized
-    and deserialized data or on the raw data if you use "read_raw()" or
-    "send_raw()".
+    read_max_bytes, send_max_bytes
+        Increase or decrease the maximum size of bytes that a peer is
+        allowed to send or read. Possible sizes are KB, MB and GB or just a
+        number for bytes. It's not case sensitiv and you can use "KB" or
+        "kb" or just "k". Notations:
+
+            # 1 MB
+            read_max_bytes => 1048576
+            read_max_bytes => '1024k'
+            read_max_bytes => '1MB'
+
+            # unlimited
+            read_max_bytes => 0
+            read_max_bytes => unlimited
+
+        NOTE that the readable and sendable size is computed by the
+        serialized and deserialized data or on the raw data if you use
+        "read_raw()" or "send_raw()".
 
   connect()
     Call "connect()" to connect to the socket. "connect()" just call "new()"
@@ -107,14 +146,17 @@ METHODS
         my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
 
         $sipc->connect(
-           PeerAddr => 'localhost',
-           PeerPort => '50010',
-           Proto    => 'tcp',
+            PeerAddr => 'localhost',
+            PeerPort => '50010',
+            Proto    => 'tcp',
         );
 
         # would call intern
 
         IO::Socket::INET->new(@_);
+
+    You can pass all params that are allowed of your favorite. I don't check
+    it.
 
   accept()
     If a Listen socket is defined then you can wait for connections with
@@ -128,9 +170,24 @@ METHODS
         my $c = $sipc->accept(10)
         warn "accept: timeout" if defined $c;
 
+  is_timeout()
+    Another check if you want to know if "accept()" return FALSE because a
+    timeout happends.
+
+        while ( 1 ) {
+           while ( my $c = $sipc->accept(10) ) {
+              # processing
+           }
+           warn "accept: timeout" if $sipc->is_timeout;
+        }
+
   disconnect()
     Call "disconnect()" to disconnect the current connection. "disconnect()"
     calls "close()" on the socket that is referenced by the object.
+
+        my $c = $sipc->accept();
+        $c->disconnect;    # to close $c
+        $sipc->disconnect; # to close $sipc
 
   sock()
     Call "sock()" to access the raw object of your favorite module.
@@ -157,7 +214,7 @@ METHODS
     Call "send()" to send data over the socket to the peer. The data will be
     serialized and packed before it sends to the peer. If you use the
     default serializer then you must handoff a reference, otherwise an error
-    occure because "nfreeze()" of Storable just works with references.
+    occurs because "nfreeze()" of Storable just works with references.
 
         $sipc->send("Hello World!");  # this would fail
         $sipc->send(\"Hello World!"); # this not
@@ -169,21 +226,22 @@ METHODS
 
   read()
     Call "read()" to read data from the socket. The data will be unpacked
-    and deserialized before it is returned. If the maximum read bytes is
-    overtaken or an error occured then "read()" returns undef and aborts to
-    read from the socket.
+    and deserialized before it's returned. If the maximum bytes is overtaken
+    or an error occured then "read()" returns undef and aborts to read from
+    the socket.
 
   read_raw() and send_raw()
     If you want to read or send a raw string and disable the serializer for
-    a single transport then you can call "read_raw()" or "send_raw()".
+    a single transport then you can call "read_raw()" or "send_raw()". Note
+    that "read_raw()" and "send_raw()" doesn't work with references!
 
   errstr()
     Call "errstr()" to get the current error message if a method returns
-    undef. "errstr()" is not useable with "new()" because "new()" croaks by
-    wrong settings.
+    FALSE. "errstr()" is not useable with "new()" because "new()" croaks
+    with incorrect arguments.
 
-    NOTE that "errstr()" returns the current error message that contain $!
-    if necessary. If you use IO::Socket::SSL then the message from
+    NOTE that "errstr()" returns the current error message and contain $! if
+    necessary. If you use IO::Socket::SSL then the message from
     IO::Socket::SSL->errstr is appended as well.
 
   debug()
@@ -191,7 +249,8 @@ METHODS
 
         $sipc->debug(1);
 
-    The debugger will set IO::Socket::SSL::DEBUG as well if you use it.
+    It you use IO::Socket::SSL then $IO::Socket::SSL::DEBUG is set to level
+    that you passed with "debug()".
 
 EXAMPLES
     Take a look to the examples directory.

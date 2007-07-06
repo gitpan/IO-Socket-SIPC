@@ -1,3 +1,7 @@
+0.05    Released at 2007-07-06.
+        Checking now &Errno::ETIMEDOUT for a timeout.
+        Kicked read_max_bytes(), send_max_bytes(). Not really needed!
+        Did a lot of code improvements and pod changes.
 0.04    Released at 2007-07-05.
         Added more error handling. Now I try to return the correct error string
           because IO::Socket::SSL got advanced ssl errors.

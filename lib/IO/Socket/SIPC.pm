@@ -6,20 +6,46 @@ IO::Socket::SIPC - Serialize perl structures for inter process communication.
 
     use IO::Socket::SIPC;
 
+    my $sipc = IO::Socket::SIPC->new(
+       favorite       => 'IO::Socket::INET',
+       use_check_sum  => 1,
+       read_may_bytes => '512k',
+       send_may_bytes => '512k'
+    );
+
+    $sipc->connect(
+       LocalAddr       => $address,
+       LocalPort       => $port,
+       Proto           => $proto,
+       Listen          => $listen,
+       ReuseAddr       => $reuse,
+    ) or die $sipc->errstr;
+
+    my $client = $sipc->accept($timeout);
+
+    my %perl_struct = (
+       hash  => { foo => 'bar' },
+       array => [ 'foo', 'bar' ],
+    );
+
+    $client->send( \%perl_struct );
+
 =head1 DESCRIPTION
 
-This module makes it possible to transport perl structures between processes over sockets.
-It wrappes your favorite IO::Socket module and controls the amount of data over the socket.
-The default serializer is Storable with C<nfreeze()> and C<thaw()> but you can choose each
-other serializer you wish to use. You have just follow some restrictions and need only some
-lines of code to adjust it for yourself. In addition it's possible to use a checksum to check
-the integrity of the transported data. Take a look to the method section.
+This module makes it possible to transport perl structures between processes. It wrappes
+your favorite IO::Socket module and controls the amount of data and verifies it with a checksum.
+
+The default serializer is Storable with C<nfreeze()> and C<thaw()> and the default checksum generator
+is Digest::MD5 with C<md5()> but you can choose any other serializer or checksum generator you wish
+to use, there are just some restrictions that you have to comply with and you only need to adjust a
+few lines of code by yourself.
 
 =head1 METHODS
 
-=head2 new()
+=head2 new(\%config)
 
-Call C<new()> to create a new IO::Socket::SIPC object.
+The C<new()> constructor method creates a new IO::Socket::SIPC object. A list of parameters as a hash or
+a hash reference may be passed to it.
 
     favorite        Set your favorite module - IO::Socket::(INET|UNIX|SSL).
     deflate         Pass your own sub reference for serializion.
@@ -29,21 +55,27 @@ Call C<new()> to create a new IO::Socket::SIPC object.
     use_check_sum   Check each transport with a MD5 sum.
     gen_check_sum   Set up your own checksum generator.
 
-Defaults
+The defaults are:
 
     favorite        IO::Socket::INET
     deflate         nfreeze() of Storable
     inflate         thaw() of Storable (in a Safe compartment)
     read_max_bytes  unlimited
     send_max_bytes  unlimited
-    gen_check_sum   md5() of Digest::MD5
-    use_check_sum   enabled (disable it with 0)
+    use_check_sum   disabled (enable it with 1)
+    gen_check_sum   md5() of Digest::MD5 if use_check_sum is enabled
 
-Set your favorite socket handler:
+=over 4
+
+=item favorite
+
+Set your favorite socket handler - IO::Socket::INET, IO::Socket::UNIX or IO::Socket::SSL.
 
     use IO::Socket::SIPC;
 
     my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
+    
+=item deflate, inflate
 
 Set your own serializer:
 
@@ -65,39 +97,52 @@ Set your own serializer:
         inflate => sub { JSON::PC::parse($_[0])   },
     );
 
-NOTE that the code that you handoff with deflate and inflate is embed in an eval block and if
-it an error occurs you can get the error string by calling C<errstr()>. If you use the default
+NOTE that the code that you handoff to deflate and inflate is embedded in an eval block for executions
+and if an error occurs you can get the error string by calling C<errstr()>. If you use the default
 deserializer of Storable then the data is deserialized in a Safe compartment. If you use another
 deserializer you have to build your own Safe compartment within your code ref!
 
-Use your own checksum generator (dummy example):
+=item use_check_sum
+
+Turn it on (1) or off (0) for the current object.
+
+If you turn it on then a checksum is generated for any packet that is transportet.
+
+The default checksum generator is C<md5()> of Digest::MD5.
+
+=item gen_check_sum
+
+Use your own checksum generator:
+
+    use Digest::SHA2;
+
+    my $sha2obj = new Digest::SHA2;
 
     my $sipc = IO::Socket::SIPC->new(
-       gen_check_sum => sub { Your::Fav::gen_sum($_[0]) }
+        gen_check_sum => sub { $sha2obj->digest($_[0]) }
     );
 
 But I think Digest::MD5 is very well and it does it's job.
 
-=head2 read_max_bytes() and send_max_bytes()
+=item read_max_bytes, send_max_bytes
 
-Call both methods to increase or decrease the maximum bytes that the server or client
-is allowed to C<read()> or C<send()>. Possible sizes are KB, MB and GB or just a number
-for bytes. It's not case sensitiv and you can use C<KB> or C<kb> or just C<k>. If you want
-set the readable or sendable size to unlimited then you can call both methods with 0 or
-C<unlimited>. The default max send and read size is unlimited.
+Increase or decrease the maximum size of bytes that a peer is allowed to send or read.
+Possible sizes are KB, MB and GB or just a number for bytes. It's not case sensitiv and
+you can use C<KB> or C<kb> or just C<k>. Notations:
 
-Here some notations examples
-
-    $sipc->read_max_bytes(1048576);
-    $sipc->read_max_bytes('1024k');
-    $sipc->read_max_bytes('1MB');
+    # 1 MB
+    read_max_bytes => 1048576
+    read_max_bytes => '1024k'
+    read_max_bytes => '1MB'
 
     # unlimited
-    $sipc->read_max_bytes('unlimited');
-    $sipc->read_max_bytes(0);
+    read_max_bytes => 0
+    read_max_bytes => unlimited
 
 NOTE that the readable and sendable size is computed by the serialized and deserialized data
 or on the raw data if you use C<read_raw()> or C<send_raw()>.
+
+=back
 
 =head2 connect()
 
@@ -107,14 +152,16 @@ and handoff all params to it. Example:
     my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
 
     $sipc->connect(
-       PeerAddr => 'localhost',
-       PeerPort => '50010',
-       Proto    => 'tcp',
+        PeerAddr => 'localhost',
+        PeerPort => '50010',
+        Proto    => 'tcp',
     );
 
     # would call intern
 
     IO::Socket::INET->new(@_);
+
+You can pass all params that are allowed of your favorite. I don't check it.
 
 =head2 accept()
 
@@ -128,10 +175,25 @@ You can set a timeout value in seconds.
     my $c = $sipc->accept(10)
     warn "accept: timeout" if defined $c;
 
+=head2 is_timeout()
+
+Another check if you want to know if C<accept()> return FALSE because a timeout happends.
+
+    while ( 1 ) {
+       while ( my $c = $sipc->accept(10) ) {
+          # processing
+       }
+       warn "accept: timeout" if $sipc->is_timeout;
+    }
+
 =head2 disconnect()
 
 Call C<disconnect()> to disconnect the current connection. C<disconnect()> calls C<close()> on
 the socket that is referenced by the object.
+
+    my $c = $sipc->accept();
+    $c->disconnect;    # to close $c
+    $sipc->disconnect; # to close $sipc
 
 =head2 sock()
 
@@ -158,7 +220,7 @@ that $c is the unwrapped IO::Socket::* object and not a IO::Socket::SIPC object.
 
 Call C<send()> to send data over the socket to the peer. The data will be serialized
 and packed before it sends to the peer. If you use the default serializer then you
-must handoff a reference, otherwise an error occure because C<nfreeze()> of Storable
+must handoff a reference, otherwise an error occurs because C<nfreeze()> of Storable
 just works with references.
 
     $sipc->send("Hello World!");  # this would fail
@@ -171,20 +233,21 @@ C<send()> returns undef on errors or if send_max_bytes is overtaken.
 =head2 read()
 
 Call C<read()> to read data from the socket. The data will be unpacked and deserialized
-before it is returned. If the maximum read bytes is overtaken or an error occured then
+before it's returned. If the maximum bytes is overtaken or an error occured then
 C<read()> returns undef and aborts to read from the socket.
 
 =head2 read_raw() and send_raw()
 
 If you want to read or send a raw string and disable the serializer for a single transport then
-you can call C<read_raw()> or C<send_raw()>.
+you can call C<read_raw()> or C<send_raw()>. Note that C<read_raw()> and C<send_raw()> doesn't
+work with references!
 
 =head2 errstr()
 
-Call C<errstr()> to get the current error message if a method returns undef. C<errstr()> is not
-useable with C<new()> because C<new()> croaks by wrong settings.
+Call C<errstr()> to get the current error message if a method returns FALSE. C<errstr()> is not
+useable with C<new()> because C<new()> croaks with incorrect arguments.
 
-NOTE that C<errstr()> returns the current error message that contain C<$!> if necessary. If you use
+NOTE that C<errstr()> returns the current error message and contain C<$!> if necessary. If you use
 IO::Socket::SSL then the message from IO::Socket::SSL->errstr is appended as well.
 
 =head2 debug()
@@ -193,7 +256,7 @@ You can turn on a little debugger if you like
 
     $sipc->debug(1);
 
-The debugger will set IO::Socket::SSL::DEBUG as well if you use it.
+It you use IO::Socket::SSL then C<$IO::Socket::SSL::DEBUG> is set to level that you passed with C<debug()>.
 
 =head1 EXAMPLES
 
@@ -250,17 +313,12 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use strict;
 use warnings;
 use UNIVERSAL::require;
 use Carp qw/croak/;
-
-# the default send + read bytes is unlimited
-use constant DEFAULT_IO_SOCKET => 'IO::Socket::INET';
-use constant DEFAULT_MAX_BYTES => 0;
-use constant USE_CHECK_SUM     => 1;
 
 # globals
 use vars qw/$ERRSTR $MAXBUF $DEBUG/;
@@ -269,44 +327,24 @@ $MAXBUF = 16384;
 
 sub new {
    my $class = shift;
-   my $self  = $class->_new(@_);
+   my $args  = ref($_[0]) eq 'HASH' ? shift : {@_};
+   my $self  = bless {}, $class;
 
-   $self->read_max_bytes($self->{read_max_bytes});
-   $self->send_max_bytes($self->{send_max_bytes});
-   $self->_load_favorite;
+   $self->{read_max_bytes} = $class->_cal_bytes($args->{read_max_bytes} || 0);
+   $self->{send_max_bytes} = $class->_cal_bytes($args->{send_max_bytes} || 0);
 
-   if (!$self->{deflate} && !$self->{inflate}) {
-      $self->_load_serializer;
-   } elsif (ref($self->{deflate}) ne 'CODE' || ref($self->{inflate}) ne 'CODE') {
-      croak "$class: options deflate and inflate expects a code ref";
-   }
+   $self->{use_check_sum}  =
+      defined $args->{use_check_sum}
+         ? $args->{use_check_sum} =~ /^[10]*\z/
+              ? $args->{use_check_sum}
+              : croak "$class: invalid value for use_check_sum"
+         : 0;
 
-   if (defined $self->{use_check_sum}) {
-      croak "$class: invalid value for option use_check_sum" unless $self->{use_check_sum} =~ /^[10]\z/;
-      if ($self->{gen_check_sum} && ref($self->{gen_check_sum}) ne 'CODE') {
-         croak "$class: option gen_check_sum expect a code ref";
-      } else {
-         $self->_load_digest;
-      }
-   }
+   $self->_load_digest($args->{gen_check_sum});
+   $self->_load_serializer($args->{deflate}, $args->{inflate});
+   $self->_load_favorite($args->{favorite} || 'IO::Socket::INET');
 
    return $self;
-}
-
-sub read_max_bytes {
-   my ($self, $bytes) = @_; 
-   my $class = ref($self);
-   warn "set read_max_bytes to $bytes" if defined $bytes && $DEBUG;
-   $self->{read_max_bytes} = $class->_bytes_calculator($bytes);
-   return 1;
-}
-
-sub send_max_bytes {
-   my ($self, $bytes) = @_; 
-   my $class = ref($self);
-   warn "set send_max_bytes to $bytes" if defined $bytes && $DEBUG;
-   $self->{send_max_bytes} = $class->_bytes_calculator($bytes);
-   return 1;
 }
 
 sub connect {
@@ -319,7 +357,7 @@ sub connect {
 }
 
 sub accept {
-   my ($self, $timeout) = @_;
+   my ($self, $timeout) = @_; 
    my $class = ref($self);
    my $sock = $self->{sock} or return $self->_raise_error("there is no socket defined");
    my %options = %{$self};
@@ -328,26 +366,29 @@ sub accept {
       croak "$class: timeout isn't numeric" unless $timeout =~ /^\d+\z/;
       warn "set timeout to '$timeout'" if $DEBUG;
       $sock->timeout($timeout);
-   }
+   }   
 
    warn "waiting for connection" if $DEBUG;
 
    my $new_sock = $sock->accept or do {
-      if ($@ =~ /timeout/i) {
+      if ($! == &Errno::ETIMEDOUT) {
          warn $@ if $DEBUG;
-         $ERRSTR = $@; $@ = ''; return 0;
+         $ERRSTR = $@; return 0;
       } else {
-         return $self->_raise_sock_error("error on accept()");
+         return $self->_raise_sock_error("accept() error");
       }
-   };
+   };  
 
    warn "incoming request" if $DEBUG;
 
    # create and return a new object
-   my $new = $class->_new(%{$self});
-   $new->{sock} = $new_sock;
-   return $new;
+   warn "create a new IO::Socket::SIPC object" if $DEBUG;
+   my %new = %{$self};
+   $new{sock} = $new_sock;
+   return bless \%new, $class;
 }
+
+sub is_timeout { $! == &Errno::ETIMEDOUT }
 
 sub disconnect {
    my $self = shift;
@@ -375,41 +416,21 @@ sub send {
 
    warn "send data" if !$no_deflate && $DEBUG;
 
-   # --------------------------------------------------------
-   # at first we serializing data and reuse $data all time
-   # because we don't like to blow away memory
-   # --------------------------------------------------------
-
    unless ($no_deflate) {
       $data = $self->_deflate($data)
          or return undef;
    }
-
-   # -------------------------------------------------------
-   # the length is used to check if the serialized data
-   # exceeds send_max_bytes, because read_max_bytes checks
-   # the serialized length as well
-   # -------------------------------------------------------
 
    my $length = length($data);
 
    return $self->_raise_error("the data length ($length bytes) exceeds send_max_bytes")
       if $maxbyt && $length > $maxbyt;
 
-   # ------------------------------------------------------------
-   # send a checksum of data to the peer if use_check_sum is true
-   # ------------------------------------------------------------
-
    if ($self->{use_check_sum}) {
       my $checksum = $self->_gen_check_sum($data) or return undef;
       $checksum    = pack("n/a*", $checksum); # 2 bytes
       $self->_send(\$checksum) or return undef;
    }
-
-   # ----------------------------------------------------------
-   # pack the data. 4 bytes should be really enough to identify
-   # the data length. if not, then we got a problem here ;-)
-   # ----------------------------------------------------------
 
    $data = pack("N/a*", $data);
    return $self->_send(\$data);
@@ -423,10 +444,6 @@ sub read {
 
    warn "read data" if !$no_inflate && $DEBUG;
 
-   # -------------------------------------------------------------
-   # At first we read the checksum if option use_check_sum is true
-   # -------------------------------------------------------------
-
    if ($self->{use_check_sum}) {
       warn "read checksum" if $DEBUG;
       my $packet = $self->_read(2) or return undef;
@@ -434,31 +451,15 @@ sub read {
       $recvsum   = $self->_read($sumlen) or return undef;
    }
 
-   # -----------------------------------------------------------
-   # then we read 4 bytes from the buffer. This 4 bytes contains
-   # the length of the rest of the data in the buffer
-   # -----------------------------------------------------------
-
    my $buffer = $self->_read(4) or return undef;
    my $length = unpack("N", $$buffer)
       or return $self->_raise_error("no data in buffer");
 
-   # ----------------------------------------------
-   # $maxbyt is the absolute allowed maximum length
-   # ----------------------------------------------
-
    return $self->_raise_error("the buffer length ($length bytes) exceeds read_max_bytes")
       if $maxbyt && $length > $maxbyt;
 
-   # ---------------------------------
-   # now read the rest from the socket
-   # ---------------------------------
-
+   warn "read data packet" if $DEBUG;
    my $packet = $self->_read($length);
-
-   # ---------------------------------------------
-   # checking the md5sum if option use_check_sum is true
-   # ----------------------------------------------
 
    if ($self->{use_check_sum}) {
       my $checksum = $self->_gen_check_sum($$packet) or return undef;
@@ -466,10 +467,6 @@ sub read {
       return $self->_raise_error("the checksums are not identical")
          unless $$recvsum eq $checksum;
    }
-
-   # ------------------------------------------
-   # deserializing data if $no_inflate is false
-   # ------------------------------------------
 
    return $no_inflate ? $$packet : $self->_inflate($$packet);
 }
@@ -486,6 +483,7 @@ sub debug {
    my $self;
    ($self, $DEBUG) = @_;
    if ($self->{favorite} eq 'IO::Socket::SSL') {
+      warn "set IO::Socket::SSL::DEBUG to level $DEBUG" if $DEBUG;
       $IO::Socket::SSL::DEBUG = $DEBUG;
    }
 }
@@ -493,13 +491,6 @@ sub debug {
 # -------------
 # private stuff
 # -------------
-
-sub _new {
-   my $class = shift;
-   my $args  = ref($_[0]) eq 'HASH' ? $_[0] : { @_ };
-   warn "creating new IO::Socket::SIPC object" if $DEBUG;
-   return bless $args, $class;
-}
 
 sub _send {
    my ($self, $packet) = @_;
@@ -569,40 +560,47 @@ sub _gen_check_sum {
 }
 
 sub _load_serializer {
-   my $self = shift;
+   my ($self, $deflate, $inflate) = @_;
+   my $class = ref($self);
 
-   'Storable'->require;
-   'Safe'->require;
+   if ($deflate || $inflate) {
+      croak "$class: deflate and inflate must be a code ref"
+         unless ref($deflate) eq 'CODE' || ref($inflate) eq 'CODE';
+      $self->{deflate} = $deflate;
+      $self->{inflate} = $inflate;
+   } else {
+      'Storable'->require;
+      'Safe'->require;
 
-   my $safe = Safe->new;
-   $safe->permit(qw/:default require/);
+      my $safe = Safe->new;
+      $safe->permit(qw/:default require/);
 
-   {  # no warnings 'once' block
-       no warnings 'once';
-       $Storable::Deparse = 1;
-       $Storable::Eval = sub { $safe->reval($_[0]) };
+      {  # no warnings 'once' block
+          no warnings 'once';
+          $Storable::Deparse = 1;
+          $Storable::Eval = sub { $safe->reval($_[0]) };
+      }
+
+      $self->{deflate} = sub { Storable::nfreeze($_[0]) };
+      $self->{inflate} = sub { Storable::thaw($_[0]) };
    }
-
-   $self->{deflate} = sub { Storable::nfreeze($_[0]) };
-   $self->{inflate} = sub { Storable::thaw($_[0]) };
 }
 
 sub _load_favorite {
-   my $self = shift;
-   $self->{favorite} ||= DEFAULT_IO_SOCKET;
+   my ($self, $favorite) = @_;
    my $class = ref($self);
-   $self->{favorite} =~ /^IO::Socket::(?:INET|UNIX|SSL)\z/
-      or croak "$class: invalid favorite '$self->{favorite}'";
-   $self->{favorite}->require
-      or croak "$class: unable to require $self->{favorite}";
+   $favorite =~ /^IO::Socket::(?:INET|UNIX|SSL)\z/
+      or croak "$class: invalid favorite '$favorite'";
+   $favorite->require
+      or croak "$class: unable to require $favorite";
+   $self->{favorite} = $favorite;
 }
 
-sub _bytes_calculator {
+sub _cal_bytes {
    my ($class, $bytes) = @_;
-
    return
       !$bytes || $bytes =~ /^unlimited\z/i
-         ? DEFAULT_MAX_BYTES
+         ? 0
          : $bytes =~ /^\d+\z/
             ? $bytes
             : $bytes =~ /^(\d+)\s*kb{0,1}\z/i
@@ -615,10 +613,16 @@ sub _bytes_calculator {
 }
 
 sub _load_digest {
-   my $self = shift;
-   'Digest::MD5'->require;
-   $self->{gen_check_sum} = \&Digest::MD5::md5;
-   $self->{use_check_sum} = 1;
+   my ($self, $code) = @_;
+   my $class = ref($self);
+   if ($code) {
+      croak "$class: gen_check_sum is not a code ref"
+         unless ref($code) eq 'CODE';
+      $self->{gen_check_sum} = $code;
+   } else {
+      'Digest::MD5'->require or croak "unable to require Digest::MD5: $!";
+      $self->{gen_check_sum} = \&Digest::MD5::md5;
+   }
 }
 
 sub _raise_error {

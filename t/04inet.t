@@ -7,7 +7,10 @@ my $addr = '127.0.0.1';
 my $port = ();
 
 {  # THE SERVER
-   my $socket = IO::Socket::SIPC->new( read_max_bytes => 100 );
+   my $socket = IO::Socket::SIPC->new(
+      use_check_sum  => 1,
+      read_max_bytes => 100,
+    );
 
    ok($socket, "new object");
 
@@ -70,7 +73,7 @@ my $port = ();
 sleep 1;
 
 {  # THE CLIENT
-   my $socket = IO::Socket::SIPC->new();
+   my $socket = IO::Socket::SIPC->new( use_check_sum => 1 );
 
    $socket->connect(
       PeerAddr        => $addr,

@@ -4,7 +4,10 @@ use warnings;
 use Data::Dumper;
 use IO::Socket::SIPC;
 
-my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
+my $sipc = IO::Socket::SIPC->new(
+   favorite      => 'IO::Socket::INET',
+   use_check_sum => 1,
+);
 
 $sipc->connect(
    PeerAddr => 'localhost',
