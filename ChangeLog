@@ -1,3 +1,8 @@
+0.07    Released at 2007-07-08.
+        Changed option favorite to socket_handler.
+        Added INET6 to the list for possible socket handlers.
+0.06    Released at 2007-07-06.
+        Fixed pod - forget the examples :-)
 0.05    Released at 2007-07-06.
         Checking now &Errno::ETIMEDOUT for a timeout.
         Kicked read_max_bytes(), send_max_bytes(). Not really needed!

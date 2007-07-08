@@ -4,8 +4,8 @@ use warnings;
 use IO::Socket::SIPC;
 
 my $sipc = IO::Socket::SIPC->new(
-   favorite      => 'IO::Socket::SSL',
-   use_check_sum => 1,
+   socket_handler => 'IO::Socket::SSL',
+   use_check_sum  => 1,
 );
 
 $sipc->connect(

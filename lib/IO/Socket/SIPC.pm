@@ -7,10 +7,10 @@ IO::Socket::SIPC - Serialize perl structures for inter process communication.
     use IO::Socket::SIPC;
 
     my $sipc = IO::Socket::SIPC->new(
-       favorite       => 'IO::Socket::INET',
+       socket_handler => 'IO::Socket::INET',
        use_check_sum  => 1,
-       read_may_bytes => '512k',
-       send_may_bytes => '512k'
+       read_max_bytes => '512k',
+       send_max_bytes => '512k'
     );
 
     $sipc->connect(
@@ -32,8 +32,8 @@ IO::Socket::SIPC - Serialize perl structures for inter process communication.
 
 =head1 DESCRIPTION
 
-This module makes it possible to transport perl structures between processes. It wrappes
-your favorite IO::Socket module and controls the amount of data and verifies it with a checksum.
+This module makes it possible to transport perl structures between processes. It wraps
+your IO::Socket handler and controls the amount of data and verifies it with a checksum.
 
 The default serializer is Storable with C<nfreeze()> and C<thaw()> and the default checksum generator
 is Digest::MD5 with C<md5()> but you can choose any other serializer or checksum generator you wish
@@ -42,12 +42,12 @@ few lines of code by yourself.
 
 =head1 METHODS
 
-=head2 new(\%config)
+=head2 new()
 
-The C<new()> constructor method creates a new IO::Socket::SIPC object. A list of parameters as a hash or
-a hash reference may be passed to it.
+The C<new()> constructor method creates a new IO::Socket::SIPC object. A list of parameters may be
+passed to it as a hash or hash reference.
 
-    favorite        Set your favorite module - IO::Socket::(INET|UNIX|SSL).
+    socket_handler  Set your socket handler - IO::Socket::(INET|INET6|UNIX|SSL).
     deflate         Pass your own sub reference for serializion.
     inflate         Pass your own sub reference for deserializion.
     read_max_bytes  Set the maximum allowed bytes to read from the socket.
@@ -57,7 +57,7 @@ a hash reference may be passed to it.
 
 The defaults are:
 
-    favorite        IO::Socket::INET
+    socket_handler  IO::Socket::INET
     deflate         nfreeze() of Storable
     inflate         thaw() of Storable (in a Safe compartment)
     read_max_bytes  unlimited
@@ -67,13 +67,13 @@ The defaults are:
 
 =over 4
 
-=item favorite
+=item socket_handler
 
-Set your favorite socket handler - IO::Socket::INET, IO::Socket::UNIX or IO::Socket::SSL.
+Set your socket handler - IO::Socket::INET, IO::Socket::INET6, IO::Socket::UNIX or IO::Socket::SSL.
 
     use IO::Socket::SIPC;
 
-    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
+    my $sipc = IO::Socket::SIPC->new( socket_handler => 'IO::Socket::SSL' );
     
 =item deflate, inflate
 
@@ -100,13 +100,11 @@ Set your own serializer:
 NOTE that the code that you handoff to deflate and inflate is embedded in an eval block for executions
 and if an error occurs you can get the error string by calling C<errstr()>. If you use the default
 deserializer of Storable then the data is deserialized in a Safe compartment. If you use another
-deserializer you have to build your own Safe compartment within your code ref!
+deserializer you have to build your own Safe compartment!
 
 =item use_check_sum
 
-Turn it on (1) or off (0) for the current object.
-
-If you turn it on then a checksum is generated for any packet that is transportet.
+Turn it on (1) or off (0). If you turn it on then a checksum is generated for any packet that is transportet.
 
 The default checksum generator is C<md5()> of Digest::MD5.
 
@@ -128,7 +126,7 @@ But I think Digest::MD5 is very well and it does it's job.
 
 Increase or decrease the maximum size of bytes that a peer is allowed to send or read.
 Possible sizes are KB, MB and GB or just a number for bytes. It's not case sensitiv and
-you can use C<KB> or C<kb> or just C<k>. Notations:
+you can use C<KB> or C<kb> or just C<k>. Notation examples:
 
     # 1 MB
     read_max_bytes => 1048576
@@ -139,17 +137,17 @@ you can use C<KB> or C<kb> or just C<k>. Notations:
     read_max_bytes => 0
     read_max_bytes => unlimited
 
-NOTE that the readable and sendable size is computed by the serialized and deserialized data
-or on the raw data if you use C<read_raw()> or C<send_raw()>.
+NOTE that the readable and sendable size is computed by the serialized data or on the raw data
+if you use C<read_raw()> or C<send_raw()>.
 
 =back
 
 =head2 connect()
 
-Call C<connect()> to connect to the socket. C<connect()> just call C<new()> of your favorite
-and handoff all params to it. Example:
+Call C<connect()> to connect to the socket. C<connect()> just call C<new()> of your socket handler
+and passes all parameters to it. Example:
 
-    my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
+    my $sipc = IO::Socket::SIPC->new( socket_handler => 'IO::Socket::INET' );
 
     $sipc->connect(
         PeerAddr => 'localhost',
@@ -161,12 +159,12 @@ and handoff all params to it. Example:
 
     IO::Socket::INET->new(@_);
 
-You can pass all params that are allowed of your favorite. I don't check it.
+You can pass all parameters that are allowed of your socket handler. I don't check it.
 
 =head2 accept()
 
 If a Listen socket is defined then you can wait for connections with C<accept()>. C<accept()> is
-just a wrapper to the original C<accept()> method of your favorite. If a connection is accepted
+just a wrapper to the original C<accept()> method of your socket handler. If a connection is accepted
 then a new object is created related to the peer. The new object will be returned on success,
 undef on error and 0 on a timeout.
 
@@ -177,7 +175,7 @@ You can set a timeout value in seconds.
 
 =head2 is_timeout()
 
-Another check if you want to know if C<accept()> return FALSE because a timeout happends.
+Another check if you want to know if a timeout happends.
 
     while ( 1 ) {
        while ( my $c = $sipc->accept(10) ) {
@@ -192,12 +190,12 @@ Call C<disconnect()> to disconnect the current connection. C<disconnect()> calls
 the socket that is referenced by the object.
 
     my $c = $sipc->accept();
-    $c->disconnect;    # to close $c
-    $sipc->disconnect; # to close $sipc
+    $c->disconnect;    # would close $c
+    $sipc->disconnect; # would close $sipc
 
 =head2 sock()
 
-Call C<sock()> to access the raw object of your favorite module.
+Call C<sock()> to access the raw object of your socket handler.
 
 IO::Socket::INET examples:
 
@@ -256,7 +254,7 @@ You can turn on a little debugger if you like
 
     $sipc->debug(1);
 
-It you use IO::Socket::SSL then C<$IO::Socket::SSL::DEBUG> is set to level that you passed with C<debug()>.
+It you use IO::Socket::SSL then C<$IO::Socket::SSL::DEBUG> is set to that level that you passed with C<debug()>.
 
 =head1 EXAMPLES
 
@@ -269,8 +267,8 @@ Take a look to the examples directory.
     use IO::Socket::SIPC;
 
     my $sipc = IO::Socket::SIPC->new(
-       favorite      => 'IO::Socket::INET',
-       use_check_sum => 1,
+       socket_handler => 'IO::Socket::INET',
+       use_check_sum  => 1,
     );
 
     $sipc->connect(
@@ -308,8 +306,8 @@ Take a look to the examples directory.
     use IO::Socket::SIPC;
 
     my $sipc = IO::Socket::SIPC->new(
-       favorite      => 'IO::Socket::INET',
-       use_check_sum => 1,
+       socket_handler => 'IO::Socket::INET',
+       use_check_sum  => 1,
     );
 
     $sipc->connect(
@@ -328,8 +326,8 @@ Take a look to the examples directory.
 
 =head1 PREREQUISITES
 
-    UNIVERSAL::require  -  to post load favorite modules
-    IO::Socket::INET    -  to create sockets
+    UNIVERSAL::require  -  to post load modules
+    IO::Socket::INET    -  the default socket handler
     Digest::MD5         -  to check the data before and after transports
     Storable            -  the default serializer and deserializer
     Safe                -  deserialize (Storable::thaw) in a safe compartment
@@ -371,7 +369,7 @@ modify it under the same terms as Perl itself.
 =cut
 
 package IO::Socket::SIPC;
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 use strict;
 use warnings;
@@ -400,16 +398,16 @@ sub new {
 
    $self->_load_digest($args->{gen_check_sum});
    $self->_load_serializer($args->{deflate}, $args->{inflate});
-   $self->_load_favorite($args->{favorite} || 'IO::Socket::INET');
+   $self->_load_socket_handler($args->{socket_handler} || $args->{favorite} || 'IO::Socket::INET');
 
    return $self;
 }
 
 sub connect {
    my $self = shift;
-   my $favorite = $self->{favorite};
-   warn "create a new $self->{favorite} object" if $DEBUG;
-   $self->{sock} = $favorite->new(@_)
+   my $socket_handler = $self->{socket_handler};
+   warn "create a new $self->{socket_handler} object" if $DEBUG;
+   $self->{sock} = $socket_handler->new(@_)
       or return $self->_raise_sock_error("unable to create socket");
    return 1;
 }
@@ -532,7 +530,7 @@ sub read {
 sub sock {
    # return object || class
    warn "access sock object" if $DEBUG;
-   return $_[0]->{sock} || $_[0]->{favorite};
+   return $_[0]->{sock} || $_[0]->{socket_handler};
 }
 
 sub errstr { return $ERRSTR }
@@ -540,7 +538,7 @@ sub errstr { return $ERRSTR }
 sub debug {
    my $self;
    ($self, $DEBUG) = @_;
-   if ($self->{favorite} eq 'IO::Socket::SSL') {
+   if ($self->{socket_handler} eq 'IO::Socket::SSL') {
       warn "set IO::Socket::SSL::DEBUG to level $DEBUG" if $DEBUG;
       $IO::Socket::SSL::DEBUG = $DEBUG;
    }
@@ -644,14 +642,14 @@ sub _load_serializer {
    }
 }
 
-sub _load_favorite {
-   my ($self, $favorite) = @_;
+sub _load_socket_handler {
+   my ($self, $socket_handler) = @_;
    my $class = ref($self);
-   $favorite =~ /^IO::Socket::(?:INET|UNIX|SSL)\z/
-      or croak "$class: invalid favorite '$favorite'";
-   $favorite->require
-      or croak "$class: unable to require $favorite";
-   $self->{favorite} = $favorite;
+   $socket_handler =~ /^IO::Socket::(?:INET[6]{0,1}|UNIX|SSL)\z/
+      or croak "$class: invalid socket_handler '$socket_handler'";
+   $socket_handler->require
+      or croak "$class: unable to require $socket_handler";
+   $self->{socket_handler} = $socket_handler;
 }
 
 sub _cal_bytes {
@@ -695,7 +693,7 @@ sub _raise_sock_error {
 
    $ERRSTR .= " - $!" if $!;
 
-   if ($self->{favorite} eq 'IO::Socket::SSL') {
+   if ($self->{socket_handler} eq 'IO::Socket::SSL') {
       my $sslerr = $self->{sock} ? $self->{sock}->errstr : IO::Socket::SSL->errstr;
       $ERRSTR .= " - $sslerr" if $sslerr;
    }

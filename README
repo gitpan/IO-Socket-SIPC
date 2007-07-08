@@ -6,10 +6,10 @@ SYNOPSIS
         use IO::Socket::SIPC;
 
         my $sipc = IO::Socket::SIPC->new(
-           favorite       => 'IO::Socket::INET',
+           socket_handler => 'IO::Socket::INET',
            use_check_sum  => 1,
-           read_may_bytes => '512k',
-           send_may_bytes => '512k'
+           read_max_bytes => '512k',
+           send_max_bytes => '512k'
         );
 
         $sipc->connect(
@@ -31,8 +31,8 @@ SYNOPSIS
 
 DESCRIPTION
     This module makes it possible to transport perl structures between
-    processes. It wrappes your favorite IO::Socket module and controls the
-    amount of data and verifies it with a checksum.
+    processes. It wraps your IO::Socket handler and controls the amount of
+    data and verifies it with a checksum.
 
     The default serializer is Storable with "nfreeze()" and "thaw()" and the
     default checksum generator is Digest::MD5 with "md5()" but you can
@@ -41,11 +41,11 @@ DESCRIPTION
     need to adjust a few lines of code by yourself.
 
 METHODS
-  new(\%config)
+  new()
     The "new()" constructor method creates a new IO::Socket::SIPC object. A
-    list of parameters as a hash or a hash reference may be passed to it.
+    list of parameters may be passed to it as a hash or hash reference.
 
-        favorite        Set your favorite module - IO::Socket::(INET|UNIX|SSL).
+        socket_handler  Set your socket handler - IO::Socket::(INET|INET6|UNIX|SSL).
         deflate         Pass your own sub reference for serializion.
         inflate         Pass your own sub reference for deserializion.
         read_max_bytes  Set the maximum allowed bytes to read from the socket.
@@ -55,7 +55,7 @@ METHODS
 
     The defaults are:
 
-        favorite        IO::Socket::INET
+        socket_handler  IO::Socket::INET
         deflate         nfreeze() of Storable
         inflate         thaw() of Storable (in a Safe compartment)
         read_max_bytes  unlimited
@@ -63,13 +63,13 @@ METHODS
         use_check_sum   disabled (enable it with 1)
         gen_check_sum   md5() of Digest::MD5 if use_check_sum is enabled
 
-    favorite
-        Set your favorite socket handler - IO::Socket::INET,
+    socket_handler
+        Set your socket handler - IO::Socket::INET, IO::Socket::INET6,
         IO::Socket::UNIX or IO::Socket::SSL.
 
             use IO::Socket::SIPC;
 
-            my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::SSL' );
+            my $sipc = IO::Socket::SIPC->new( socket_handler => 'IO::Socket::SSL' );
     
     deflate, inflate
         Set your own serializer:
@@ -97,13 +97,11 @@ METHODS
         can get the error string by calling "errstr()". If you use the
         default deserializer of Storable then the data is deserialized in a
         Safe compartment. If you use another deserializer you have to build
-        your own Safe compartment within your code ref!
+        your own Safe compartment!
 
     use_check_sum
-        Turn it on (1) or off (0) for the current object.
-
-        If you turn it on then a checksum is generated for any packet that
-        is transportet.
+        Turn it on (1) or off (0). If you turn it on then a checksum is
+        generated for any packet that is transportet.
 
         The default checksum generator is "md5()" of Digest::MD5.
 
@@ -124,7 +122,7 @@ METHODS
         Increase or decrease the maximum size of bytes that a peer is
         allowed to send or read. Possible sizes are KB, MB and GB or just a
         number for bytes. It's not case sensitiv and you can use "KB" or
-        "kb" or just "k". Notations:
+        "kb" or just "k". Notation examples:
 
             # 1 MB
             read_max_bytes => 1048576
@@ -136,14 +134,14 @@ METHODS
             read_max_bytes => unlimited
 
         NOTE that the readable and sendable size is computed by the
-        serialized and deserialized data or on the raw data if you use
-        "read_raw()" or "send_raw()".
+        serialized data or on the raw data if you use "read_raw()" or
+        "send_raw()".
 
   connect()
     Call "connect()" to connect to the socket. "connect()" just call "new()"
-    of your favorite and handoff all params to it. Example:
+    of your socket handler and passes all parameters to it. Example:
 
-        my $sipc = IO::Socket::SIPC->new( favorite => 'IO::Socket::INET' );
+        my $sipc = IO::Socket::SIPC->new( socket_handler => 'IO::Socket::INET' );
 
         $sipc->connect(
             PeerAddr => 'localhost',
@@ -155,15 +153,15 @@ METHODS
 
         IO::Socket::INET->new(@_);
 
-    You can pass all params that are allowed of your favorite. I don't check
-    it.
+    You can pass all parameters that are allowed of your socket handler. I
+    don't check it.
 
   accept()
     If a Listen socket is defined then you can wait for connections with
     "accept()". "accept()" is just a wrapper to the original "accept()"
-    method of your favorite. If a connection is accepted then a new object
-    is created related to the peer. The new object will be returned on
-    success, undef on error and 0 on a timeout.
+    method of your socket handler. If a connection is accepted then a new
+    object is created related to the peer. The new object will be returned
+    on success, undef on error and 0 on a timeout.
 
     You can set a timeout value in seconds.
 
@@ -171,8 +169,7 @@ METHODS
         warn "accept: timeout" if defined $c;
 
   is_timeout()
-    Another check if you want to know if "accept()" return FALSE because a
-    timeout happends.
+    Another check if you want to know if a timeout happends.
 
         while ( 1 ) {
            while ( my $c = $sipc->accept(10) ) {
@@ -186,11 +183,11 @@ METHODS
     calls "close()" on the socket that is referenced by the object.
 
         my $c = $sipc->accept();
-        $c->disconnect;    # to close $c
-        $sipc->disconnect; # to close $sipc
+        $c->disconnect;    # would close $c
+        $sipc->disconnect; # would close $sipc
 
   sock()
-    Call "sock()" to access the raw object of your favorite module.
+    Call "sock()" to access the raw object of your socket handler.
 
     IO::Socket::INET examples:
 
@@ -249,8 +246,8 @@ METHODS
 
         $sipc->debug(1);
 
-    It you use IO::Socket::SSL then $IO::Socket::SSL::DEBUG is set to level
-    that you passed with "debug()".
+    It you use IO::Socket::SSL then $IO::Socket::SSL::DEBUG is set to that
+    level that you passed with "debug()".
 
 EXAMPLES
     Take a look to the examples directory.
@@ -261,8 +258,8 @@ EXAMPLES
         use IO::Socket::SIPC;
 
         my $sipc = IO::Socket::SIPC->new(
-           favorite      => 'IO::Socket::INET',
-           use_check_sum => 1,
+           socket_handler => 'IO::Socket::INET',
+           use_check_sum  => 1,
         );
 
         $sipc->connect(
@@ -299,8 +296,8 @@ EXAMPLES
         use IO::Socket::SIPC;
 
         my $sipc = IO::Socket::SIPC->new(
-           favorite      => 'IO::Socket::INET',
-           use_check_sum => 1,
+           socket_handler => 'IO::Socket::INET',
+           use_check_sum  => 1,
         );
 
         $sipc->connect(
@@ -318,8 +315,8 @@ EXAMPLES
         $sipc->disconnect or die $sipc->errstr;
 
 PREREQUISITES
-        UNIVERSAL::require  -  to post load favorite modules
-        IO::Socket::INET    -  to create sockets
+        UNIVERSAL::require  -  to post load modules
+        IO::Socket::INET    -  the default socket handler
         Digest::MD5         -  to check the data before and after transports
         Storable            -  the default serializer and deserializer
         Safe                -  deserialize (Storable::thaw) in a safe compartment
